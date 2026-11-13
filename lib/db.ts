@@ -57,7 +57,13 @@ function seedEvents(): EventItem[] {
       ],
     },
   ];
-  return list.map(normalizeEvent);
+
+  // เติมค่าที่ขาด (ธีม, Kiosk ฯลฯ) ให้ทุกกิจกรรม
+  const result: EventItem[] = [];
+  for (const e of list) {
+    result.push(normalizeEvent(e));
+  }
+  return result;
 }
 
 const firstNames = ['สมชาย', 'วราภรณ์', 'ธนกร', 'พิมพ์ชนก', 'กิตติพงษ์', 'นลินี', 'อนุชา', 'มณีรัตน์', 'ปิยะ', 'ชลธิชา', 'ศุภกร', 'รุ่งนภา'];
@@ -69,20 +75,27 @@ function makeRegistrations(eventId: string, count: number, spreadDays: number): 
   const list: Registration[] = [];
   for (let i = 0; i < count; i++) {
     const hour = 7 + ((i * 5) % 16);
+
+    // ทุกคนที่ i หารด้วย 7 ลงตัว ให้เป็นคนที่ลงทะเบียนที่ตู้ Kiosk
+    let source: 'online' | 'kiosk' = 'online';
+    if (i % 7 === 0) source = 'kiosk';
+
     list.push({
-      id: eventId + '-r' + i, eventId,
+      id: eventId + '-r' + i, eventId: eventId,
       name: firstNames[i % firstNames.length] + ' ' + lastNames[(i * 3) % lastNames.length],
       email: eventId + i + '@example.com', phone: '081' + String(1000000 + i * 137).slice(0, 7),
       org: orgs[(i * 2) % orgs.length], ticket: 'EV-' + eventId.toUpperCase() + (100 + i),
       checkedIn: i % 10 < 6, createdAt: daysFromNow(-(i % spreadDays), hour),
-      source: i % 7 === 0 ? 'kiosk' : 'online',
+      source: source,
     });
   }
   return list;
 }
 
 function seedRegistrations(): Registration[] {
-  return [...makeRegistrations('demo', 42, 14), ...makeRegistrations('ux', 18, 10)];
+  const demo = makeRegistrations('demo', 42, 14);
+  const ux = makeRegistrations('ux', 18, 10);
+  return demo.concat(ux);
 }
 
 function seedResponses(): Response[] {
@@ -104,16 +117,30 @@ const seeds = { users: seedUsers, events: seedEvents, registrations: seedRegistr
 // ---------- อ่าน / เขียน LocalStorage ----------
 export function readStore<T>(name: StoreName): T[] {
   if (typeof window === 'undefined') return []; // ตอนรันบน server ไม่มี localStorage
+
   const text = localStorage.getItem('we_' + name);
   if (text) {
     const list = JSON.parse(text);
+
     // กิจกรรมที่บันทึกไว้ก่อนมีฟิลด์ใหม่ -> เติมค่าเริ่มต้นให้
-    if (name === 'events') return list.map(normalizeEvent);
+    if (name === 'events') {
+      for (let i = 0; i < list.length; i++) {
+        list[i] = normalizeEvent(list[i]);
+      }
+    }
+
     // ชื่อที่แสดงเดิมของบัญชี admin ตัวอย่าง -> เปลี่ยนเป็น "Admin"
-    if (name === 'users') return list.map((u: User) => (u.id === 'u-admin' && u.name === 'ผู้ดูแลระบบ' ? { ...u, name: 'Admin' } : u));
+    if (name === 'users') {
+      for (const u of list) {
+        if (u.id === 'u-admin' && u.name === 'ผู้ดูแลระบบ') u.name = 'Admin';
+      }
+    }
+
     return list;
   }
-  const first = seeds[name]() as unknown as T[]; // ยังไม่เคยมีข้อมูล -> ใส่ข้อมูลตัวอย่าง
+
+  // ยังไม่เคยมีข้อมูล -> ใส่ข้อมูลตัวอย่าง
+  const first = seeds[name]() as unknown as T[];
   localStorage.setItem('we_' + name, JSON.stringify(first));
   return first;
 }

@@ -20,7 +20,14 @@ export const eventGroups: NavGroup[] = [
     { href: '/kiosk', icon: 'kiosk', th: 'Kiosk หน้างาน', en: 'On-site kiosk' },
   ] },
 ];
-export const eventNav: NavItem[] = eventGroups.flatMap((g) => g.items);
+
+// เอาเมนูทุกกลุ่มมารวมเป็นรายการเดียว (ใช้กับแถบเมนูล่างบนมือถือ)
+export const eventNav: NavItem[] = [];
+for (const group of eventGroups) {
+  for (const item of group.items) {
+    eventNav.push(item);
+  }
+}
 
 // เมนูของ admin: เห็นเฉพาะ "กิจกรรมทั้งหมด" กับ "มอบหมายผู้ดูแล" (จัดการผู้ใช้อยู่ในหน้ามอบหมาย)
 // ส่วนการจัดการรายละเอียดของแต่ละงานเป็นหน้าที่ของ user ที่ได้รับมอบหมาย
@@ -32,5 +39,9 @@ export const adminNav: NavItem[] = adminGroup.items;
 
 // หน้าของ admin (รวมหน้ารายงานรายกิจกรรมที่เปิดจากการ์ดกิจกรรม)
 export function isAdminPath(path: string): boolean {
-  return ['/events', '/assignments', '/reports'].some((p) => path === p || path.startsWith(p + '/'));
+  const adminPaths = ['/events', '/assignments', '/reports'];
+  for (const p of adminPaths) {
+    if (path === p || path.startsWith(p + '/')) return true;
+  }
+  return false;
 }

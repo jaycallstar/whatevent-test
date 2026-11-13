@@ -15,7 +15,10 @@ import { useLang } from '@/lib/i18n';
 import type { Access, EventItem, Registration } from '@/lib/types';
 
 // แปลงค่าจาก <input type="datetime-local"> เป็น ISO (ช่องว่าง = ไม่กำหนด)
-const fromInput = (v: string) => (v ? new Date(v).toISOString() : '');
+function fromInput(v: string): string {
+  if (!v) return '';
+  return new Date(v).toISOString();
+}
 
 export default function DetailsPage() {
   const { t } = useLang();
@@ -24,13 +27,40 @@ export default function DetailsPage() {
   const [regs] = useStore<Registration>('registrations');
   if (!current || !user) return <NoEvent />;
   const event = current;
-  const set = (changes: Partial<EventItem>) => updateCurrent({ ...event, ...changes });
-  const count = regs.filter((r) => r.eventId === event.id).length;
+
+  // แก้ค่าของกิจกรรมแล้วบันทึก
+  function set(changes: Partial<EventItem>) {
+    updateCurrent({ ...event, ...changes });
+  }
+
+  // จำนวนผู้ลงทะเบียนของกิจกรรมนี้
+  let count = 0;
+  for (const r of regs) {
+    if (r.eventId === event.id) count++;
+  }
+
+  // เวลาเริ่ม / สิ้นสุด (ถ้าช่องถูกล้างให้ไม่เปลี่ยนค่า)
+  function setStart(v: string) {
+    if (v) set({ startAt: fromInput(v) });
+  }
+  function setEnd(v: string) {
+    if (v) set({ endAt: fromInput(v) });
+  }
+
+  // ตั้งเวลาปิดรับลงทะเบียนเป็น 1 วันก่อนงานเริ่ม
+  function closeOneDayBefore() {
+    const d = new Date(event.startAt);
+    d.setDate(d.getDate() - 1);
+    set({ regCloseAt: d.toISOString() });
+  }
 
   const accessCards: { value: Access; icon: string; title: string; desc: string }[] = [
     { value: 'closed', icon: 'lock', title: t('งานปิด', 'Closed event'), desc: t('ต้องลงทะเบียนก่อนเท่านั้น มีบัตร QR เช็คอินหน้างาน กำหนดช่วงเวลารับลงทะเบียนได้', 'Registration required. Attendees get a QR ticket; set when registration opens and closes.') },
     { value: 'open', icon: 'unlock', title: t('งานเปิด', 'Open event'), desc: t('ใครก็เข้าร่วมได้ ไม่ต้องลงทะเบียน หน้าลงทะเบียนจะแสดงข้อมูลงานและวิธีเดินทางแทน', 'Anyone can join without registering. The registration page shows event info and directions instead.') },
   ];
+
+  let capacityLabel = t('จำนวนที่นั่ง', 'Capacity');
+  if (event.access === 'open') capacityLabel = t('จำนวนผู้เข้าร่วมที่คาดไว้', 'Expected attendees');
 
   return (
     <div className="stack">
@@ -46,9 +76,9 @@ export default function DetailsPage() {
             <label>{t('ชื่อกิจกรรม', 'Event name')}<input value={event.title} onChange={(e) => set({ title: e.target.value })} /></label>
             <label>{t('รายละเอียด', 'Description')}<textarea value={event.description} onChange={(e) => set({ description: e.target.value })} /></label>
             <div className="grid">
-              <label>{t('วัน-เวลาเริ่ม', 'Starts')}<input type="datetime-local" value={toInputValue(event.startAt)} onChange={(e) => e.target.value && set({ startAt: fromInput(e.target.value) })} /></label>
-              <label>{t('วัน-เวลาสิ้นสุด', 'Ends')}<input type="datetime-local" value={toInputValue(event.endAt)} onChange={(e) => e.target.value && set({ endAt: fromInput(e.target.value) })} /></label>
-              <label>{event.access === 'open' ? t('จำนวนผู้เข้าร่วมที่คาดไว้', 'Expected attendees') : t('จำนวนที่นั่ง', 'Capacity')}<input type="number" min={1} value={event.capacity} onChange={(e) => set({ capacity: Math.max(1, Number(e.target.value)) })} /></label>
+              <label>{t('วัน-เวลาเริ่ม', 'Starts')}<input type="datetime-local" value={toInputValue(event.startAt)} onChange={(e) => setStart(e.target.value)} /></label>
+              <label>{t('วัน-เวลาสิ้นสุด', 'Ends')}<input type="datetime-local" value={toInputValue(event.endAt)} onChange={(e) => setEnd(e.target.value)} /></label>
+              <label>{capacityLabel}<input type="number" min={1} value={event.capacity} onChange={(e) => set({ capacity: Math.max(1, Number(e.target.value)) })} /></label>
             </div>
           </section>
 
@@ -73,18 +103,24 @@ export default function DetailsPage() {
                 <div className="grid">
                   <label>{t('เปิดรับลงทะเบียน', 'Opens')}
                     <input type="datetime-local" value={toInputValue(event.regOpenAt)} onChange={(e) => set({ regOpenAt: fromInput(e.target.value) })} />
-                    <span className="hint">{event.regOpenAt ? <button type="button" className="link-btn" onClick={() => set({ regOpenAt: '' })}>{t('ล้างค่า (เปิดทันที)', 'Clear (open now)')}</button> : t('ว่าง = เปิดรับทันที', 'Empty = open now')}</span>
+                    <span className="hint">
+                      {event.regOpenAt && <button type="button" className="link-btn" onClick={() => set({ regOpenAt: '' })}>{t('ล้างค่า (เปิดทันที)', 'Clear (open now)')}</button>}
+                      {!event.regOpenAt && t('ว่าง = เปิดรับทันที', 'Empty = open now')}
+                    </span>
                   </label>
                   <label>{t('ปิดรับลงทะเบียน', 'Closes')}
                     <input type="datetime-local" value={toInputValue(event.regCloseAt)} onChange={(e) => set({ regCloseAt: fromInput(e.target.value) })} />
-                    <span className="hint">{event.regCloseAt ? <button type="button" className="link-btn" onClick={() => set({ regCloseAt: '' })}>{t('ล้างค่า (รับจนเต็ม)', 'Clear (until full)')}</button> : t('ว่าง = รับจนกว่าที่นั่งจะเต็ม', 'Empty = until seats run out')}</span>
+                    <span className="hint">
+                      {event.regCloseAt && <button type="button" className="link-btn" onClick={() => set({ regCloseAt: '' })}>{t('ล้างค่า (รับจนเต็ม)', 'Clear (until full)')}</button>}
+                      {!event.regCloseAt && t('ว่าง = รับจนกว่าที่นั่งจะเต็ม', 'Empty = until seats run out')}
+                    </span>
                   </label>
                 </div>
                 <div className="row">
                   <span className="small muted">{t('ตั้งค่าด่วน:', 'Quick set:')}</span>
                   <button type="button" className="chip-btn" onClick={() => set({ regOpenAt: new Date().toISOString() })}>{t('เปิดตั้งแต่ตอนนี้', 'Open from now')}</button>
                   <button type="button" className="chip-btn" onClick={() => set({ regCloseAt: event.startAt })}>{t('ปิดเมื่องานเริ่ม', 'Close at start')}</button>
-                  <button type="button" className="chip-btn" onClick={() => { const d = new Date(event.startAt); d.setDate(d.getDate() - 1); set({ regCloseAt: d.toISOString() }); }}>{t('ปิดก่อนงาน 1 วัน', 'Close 1 day before')}</button>
+                  <button type="button" className="chip-btn" onClick={closeOneDayBefore}>{t('ปิดก่อนงาน 1 วัน', 'Close 1 day before')}</button>
                 </div>
                 {event.regOpenAt && event.regCloseAt && event.regCloseAt <= event.regOpenAt && <div className="alert">{t('เวลาปิดรับต้องอยู่หลังเวลาเปิดรับ', 'The closing time must be after the opening time')}</div>}
                 <Switch checked={event.regPaused} onChange={(v) => set({ regPaused: v })} label={t('หยุดรับลงทะเบียนชั่วคราว', 'Pause registration')} hint={t('ปิดฟอร์มทันทีโดยไม่ต้องแก้เวลา (เปิดกลับได้ทุกเมื่อ)', 'Close the form right away without changing the times')} />

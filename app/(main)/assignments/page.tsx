@@ -17,6 +17,15 @@ import { formatDate, secondColor } from '@/lib/helpers';
 import { useLang } from '@/lib/i18n';
 import type { EventItem, User } from '@/lib/types';
 
+// หาผู้ใช้ที่เลือกอยู่ (ไม่ได้เลือก/ไม่เจอ ให้ใช้คนแรก ถ้าไม่มีใครเลยคืน null)
+function pickUser(list: User[], id: string): User | null {
+  for (const u of list) {
+    if (u.id === id) return u;
+  }
+  if (list.length > 0) return list[0];
+  return null;
+}
+
 export default function AssignmentsPage() {
   const { t, lang } = useLang();
   const { user } = useAuth();
@@ -27,7 +36,11 @@ export default function AssignmentsPage() {
   const [q, setQ] = useState('');
   const [userQ, setUserQ] = useState('');
 
-  const staff = users.filter((u) => u.role === 'user');
+  // เฉพาะผู้ใช้ที่ role = user (admin เห็นทุกกิจกรรมอยู่แล้ว)
+  const staff: User[] = [];
+  for (const u of users) {
+    if (u.role === 'user') staff.push(u);
+  }
 
   // เปิดจากหน้า "ผู้ใช้งาน" แบบ /assignments?user=xxx -> เลือกคนนั้นให้เลย
   useEffect(() => {
@@ -38,23 +51,97 @@ export default function AssignmentsPage() {
   if (!user) return null;
   if (user.role !== 'admin') return <div className="alert">{t('เฉพาะ admin เท่านั้นที่เข้าหน้านี้ได้', 'Only admins can open this page')}</div>;
 
-  const selected = staff.find((u) => u.id === selectedId) || staff[0] || null;
-  const unassigned = allEvents.filter((e) => e.userIds.length === 0).length;
-  const events = allEvents.filter((e) => e.title.toLowerCase().includes(q.toLowerCase()));
-  const staffList = staff.filter((u) => (u.name + u.username).toLowerCase().includes(userQ.toLowerCase()));
-  const has = (e: EventItem, u: User) => e.userIds.includes(u.id);
+  const selected = pickUser(staff, selectedId);
 
-  function toggle(eventId: string, userId: string) {
-    setAllEvents(allEvents.map((e) => e.id !== eventId ? e : { ...e, userIds: e.userIds.includes(userId) ? e.userIds.filter((x) => x !== userId) : [...e.userIds, userId] }));
+  // กิจกรรมที่ยังไม่มีผู้ดูแล
+  let unassigned = 0;
+  for (const e of allEvents) {
+    if (e.userIds.length === 0) unassigned++;
   }
+
+  // กิจกรรมที่ตรงกับคำค้นหา
+  const events: EventItem[] = [];
+  for (const e of allEvents) {
+    if (e.title.toLowerCase().includes(q.toLowerCase())) events.push(e);
+  }
+
+  // ผู้ใช้ที่ตรงกับคำค้นหา
+  const staffList: User[] = [];
+  for (const u of staff) {
+    if ((u.name + u.username).toLowerCase().includes(userQ.toLowerCase())) staffList.push(u);
+  }
+
+  // กิจกรรมนี้มีผู้ใช้คนนี้ดูแลอยู่ไหม
+  function has(e: EventItem, u: User): boolean {
+    return e.userIds.includes(u.id);
+  }
+
+  // ผู้ใช้คนนี้ดูแลกี่กิจกรรม
+  function countManaged(u: User): number {
+    let count = 0;
+    for (const e of allEvents) {
+      if (has(e, u)) count++;
+    }
+    return count;
+  }
+
+  // กิจกรรมนี้มีผู้ดูแล (ที่เป็น user) กี่คน
+  function countStaffIn(e: EventItem): number {
+    let count = 0;
+    for (const id of e.userIds) {
+      for (const u of staff) {
+        if (u.id === id) {
+          count++;
+          break;
+        }
+      }
+    }
+    return count;
+  }
+
+  // เปิด/ปิดการดูแลกิจกรรมหนึ่งของผู้ใช้คนหนึ่ง
+  function toggle(eventId: string, userId: string) {
+    const next: EventItem[] = [];
+    for (const e of allEvents) {
+      if (e.id !== eventId) {
+        next.push(e);
+        continue;
+      }
+      const ids: string[] = [];
+      if (e.userIds.includes(userId)) {
+        // มีอยู่แล้ว -> เอาออก
+        for (const x of e.userIds) {
+          if (x !== userId) ids.push(x);
+        }
+      } else {
+        // ยังไม่มี -> เพิ่มเข้าไป
+        for (const x of e.userIds) ids.push(x);
+        ids.push(userId);
+      }
+      next.push({ ...e, userIds: ids });
+    }
+    setAllEvents(next);
+  }
+
   // มอบหมาย/ถอนทุกกิจกรรมที่แสดงอยู่ (ตามคำค้นหา) ให้ผู้ใช้คนนี้
   function setAll(u: User, on: boolean) {
-    const ids = new Set(events.map((e) => e.id));
-    setAllEvents(allEvents.map((e) => {
-      if (!ids.has(e.id)) return e;
-      const without = e.userIds.filter((x) => x !== u.id);
-      return { ...e, userIds: on ? [...without, u.id] : without };
-    }));
+    const shownIds: string[] = [];
+    for (const e of events) shownIds.push(e.id);
+
+    const next: EventItem[] = [];
+    for (const e of allEvents) {
+      if (!shownIds.includes(e.id)) {
+        next.push(e);
+        continue;
+      }
+      const ids: string[] = [];
+      for (const x of e.userIds) {
+        if (x !== u.id) ids.push(x);
+      }
+      if (on) ids.push(u.id);
+      next.push({ ...e, userIds: ids });
+    }
+    setAllEvents(next);
   }
 
   return (
@@ -94,21 +181,18 @@ export default function AssignmentsPage() {
           <div className="card assign-users">
             <label className="assign-select">{t('เลือกผู้ใช้', 'Choose a user')}
               <select value={selected.id} onChange={(e) => setSelectedId(e.target.value)}>
-                {staff.map((u) => <option key={u.id} value={u.id}>{u.name} (@{u.username}) · {allEvents.filter((e) => has(e, u)).length}</option>)}
+                {staff.map((u) => <option key={u.id} value={u.id}>{u.name} (@{u.username}) · {countManaged(u)}</option>)}
               </select>
             </label>
             <div className="assign-list">
               {staff.length > 6 && <div className="search" style={{ maxWidth: 'none' }}><Icon name="search" size={16} /><input placeholder={t('ค้นหาผู้ใช้', 'Search users')} value={userQ} onChange={(e) => setUserQ(e.target.value)} /></div>}
-              {staffList.map((u) => {
-                const n = allEvents.filter((e) => has(e, u)).length;
-                return (
-                  <button key={u.id} type="button" className={u.id === selected.id ? 'user-row on' : 'user-row'} onClick={() => setSelectedId(u.id)} aria-pressed={u.id === selected.id}>
-                    <span className="avatar">{u.name.slice(0, 1)}</span>
-                    <span className="sw-text"><b className="ellipsis">{u.name}</b><small className="muted">@{u.username}</small></span>
-                    <span className="count-pill">{n}</span>
-                  </button>
-                );
-              })}
+              {staffList.map((u) => (
+                <button key={u.id} type="button" className={u.id === selected.id ? 'user-row on' : 'user-row'} onClick={() => setSelectedId(u.id)} aria-pressed={u.id === selected.id}>
+                  <span className="avatar">{u.name.slice(0, 1)}</span>
+                  <span className="sw-text"><b className="ellipsis">{u.name}</b><small className="muted">@{u.username}</small></span>
+                  <span className="count-pill">{countManaged(u)}</span>
+                </button>
+              ))}
             </div>
           </div>
 
@@ -117,7 +201,7 @@ export default function AssignmentsPage() {
             <div className="card-head">
               <div>
                 <h3>{t('กิจกรรมที่ ', 'Events managed by ')}{selected.name}{t(' ดูแล', '')}</h3>
-                <p className="hint">{allEvents.filter((e) => has(e, selected)).length} / {allEvents.length} {t('กิจกรรม', 'events')}</p>
+                <p className="hint">{countManaged(selected)} / {allEvents.length} {t('กิจกรรม', 'events')}</p>
               </div>
               <div className="row" style={{ gap: 8 }}>
                 <button className="btn small-btn" onClick={() => setAll(selected, true)}>{t('เลือกทั้งหมด', 'Select all')}</button>
@@ -127,14 +211,18 @@ export default function AssignmentsPage() {
             {events.length === 0 && <p className="muted small">{t('ไม่พบกิจกรรม', 'No events found')}</p>}
             <ul className="assign-events">
               {events.map((e) => {
-                const others = users.filter((u) => u.id !== selected.id && e.userIds.includes(u.id));
+                // ผู้ดูแลคนอื่นของกิจกรรมนี้ (ไม่นับคนที่เลือกอยู่)
+                const otherNames: string[] = [];
+                for (const u of users) {
+                  if (u.id !== selected.id && e.userIds.includes(u.id)) otherNames.push(u.name);
+                }
                 return (
                   <li key={e.id}>
                     <label className={has(e, selected) ? 'assign-row on' : 'assign-row'}>
                       <span className="sw-logo" style={{ background: 'linear-gradient(135deg,' + e.color + ',' + secondColor(e) + ')' }}>{e.logo ? <img src={e.logo} alt="" /> : (e.title || 'W').slice(0, 1)}</span>
                       <span className="sw-text">
                         <b className="ellipsis">{e.title}</b>
-                        <small className="muted ellipsis">{formatDate(e.startAt, lang)} · {e.access === 'open' ? t('งานเปิด', 'Open') : t('งานปิด', 'Closed')}{others.length > 0 && ' · ' + t('ร่วมกับ ', 'with ') + others.map((u) => u.name).join(', ')}</small>
+                        <small className="muted ellipsis">{formatDate(e.startAt, lang)} · {e.access === 'open' ? t('งานเปิด', 'Open') : t('งานปิด', 'Closed')}{otherNames.length > 0 && ' · ' + t('ร่วมกับ ', 'with ') + otherNames.join(', ')}</small>
                       </span>
                       <input type="checkbox" role="switch" className="switch" checked={has(e, selected)} onChange={() => toggle(e.id, selected.id)} aria-label={e.title} />
                     </label>
@@ -172,7 +260,10 @@ export default function AssignmentsPage() {
                       <input type="checkbox" className="mx-check" checked={has(e, u)} onChange={() => toggle(e.id, u.id)} aria-label={e.title + ' — ' + u.name} />
                     </td>
                   ))}
-                  <td className="center-text">{e.userIds.length === 0 ? <span className="status warn">{t('ไม่มี', 'None')}</span> : <b>{e.userIds.filter((id) => staff.some((u) => u.id === id)).length}</b>}</td>
+                  <td className="center-text">
+                    {e.userIds.length === 0 && <span className="status warn">{t('ไม่มี', 'None')}</span>}
+                    {e.userIds.length > 0 && <b>{countStaffIn(e)}</b>}
+                  </td>
                 </tr>
               ))}
             </tbody>

@@ -12,6 +12,13 @@ import type { EventItem, Registration, Response } from '@/lib/types';
 
 type Props = { event: EventItem; regs: Registration[]; responses: Response[] };
 
+// คะแนนเฉลี่ยของคำตอบแบบให้คะแนน
+function averageOf(answers: string[]): number {
+  let sum = 0;
+  for (const a of answers) sum += Number(a);
+  return sum / answers.length;
+}
+
 export default function EventReport({ event, regs: allRegs, responses: allResponses }: Props) {
   const { t, lang } = useLang();
   const [days, setDays] = useState(0); // 0 = ทั้งหมด
@@ -21,11 +28,24 @@ export default function EventReport({ event, regs: allRegs, responses: allRespon
   const responses = within(allResponses, days);
   const s = summarize(event, regs, responses);
   const notes = insights(event, regs, responses, t);
-  const orgs = groupCount(regs.map((r) => r.org), 8);
-  const kiosk = regs.filter((r) => r.source === 'kiosk').length;
+
+  // รวมชื่อหน่วยงาน และนับคนที่ลงทะเบียนผ่าน Kiosk
+  const orgNames: string[] = [];
+  let kiosk = 0;
+  for (const r of regs) {
+    orgNames.push(r.org);
+    if (r.source === 'kiosk') kiosk++;
+  }
+  const orgs = groupCount(orgNames, 8);
+
   const file = safeName(event.title);
-  const periodText = days ? t(days + ' วันล่าสุด', 'Last ' + days + ' days') : t('ข้อมูลทั้งหมด', 'All data');
-  const list = [...regs].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+
+  let periodText = t('ข้อมูลทั้งหมด', 'All data');
+  if (days) periodText = t(days + ' วันล่าสุด', 'Last ' + days + ' days');
+
+  // รายชื่อผู้ลงทะเบียน เรียงจากเก่าไปใหม่
+  const list = regs.slice();
+  list.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
   function exportExcel() {
     downloadExcel(file + '-report.xlsx', [
@@ -36,14 +56,24 @@ export default function EventReport({ event, regs: allRegs, responses: allRespon
     ]);
   }
 
+  // ตัวเลขสำคัญ (ชื่อหัวข้อ, ค่า)
+  let totalLabel = t('ผู้ลงทะเบียน', 'Registrants');
+  if (event.access === 'open') totalLabel = t('ผู้ลงชื่อเข้างาน', 'Signed in');
+  let averageText = '–';
+  if (s.average !== null) averageText = s.average.toFixed(2) + ' / 5';
+
   const metrics: [string, string][] = [
-    [event.access === 'open' ? t('ผู้ลงชื่อเข้างาน', 'Signed in') : t('ผู้ลงทะเบียน', 'Registrants'), s.total + ' / ' + event.capacity + ' (' + s.capacityPercent + '%)'],
+    [totalLabel, s.total + ' / ' + event.capacity + ' (' + s.capacityPercent + '%)'],
     [t('เช็คอินแล้ว', 'Checked in'), s.checkedIn + ' (' + s.checkInRate + '%)'],
     [t('ไม่มาเข้างาน', 'No-show'), String(s.total - s.checkedIn)],
     [t('ลงทะเบียนผ่าน Kiosk', 'Kiosk sign-ups'), String(kiosk)],
     [t('ตอบแบบสอบถาม', 'Survey responses'), s.responseCount + ' (' + s.responseRate + '%)'],
-    [t('คะแนนเฉลี่ย', 'Average rating'), s.average === null ? '–' : s.average.toFixed(2) + ' / 5'],
+    [t('คะแนนเฉลี่ย', 'Average rating'), averageText],
   ];
+
+  // ปุ่ม "แสดงทั้งหมด / แสดงน้อยลง" ใต้ตารางรายชื่อ
+  let showAllText = t('แสดงทั้งหมด ', 'Show all ') + list.length;
+  if (showAll) showAllText = t('แสดงน้อยลง', 'Show less');
 
   return (
     <div className="stack">
@@ -113,14 +143,28 @@ export default function EventReport({ event, regs: allRegs, responses: allRespon
           <div className="stack-sm">
             {event.questions.map((q, i) => {
               const answers = answersOf(responses, q.id);
+
+              // ข้อความสรุปของคำถามแบบให้คะแนน เช่น "1 คะแนน: 0  ·  2 คะแนน: 1 ..."
+              const ratingParts: string[] = [];
+              for (const r of ratingCounts(answers)) {
+                ratingParts.push(t(r.label + ' คะแนน: ', r.label + ' pts: ') + r.value);
+              }
+
+              // ข้อความสรุปของคำถามแบบเลือกตอบ เช่น "Facebook 5 (20%)  ·  ..."
+              const choiceParts: string[] = [];
+              for (const c of choiceCounts(q.options, answers)) {
+                choiceParts.push(c.label + ' ' + c.value + ' (' + percent(c.value, answers.length) + '%)');
+              }
+
               return (
                 <div key={q.id} className="report-q">
                   <b>{i + 1}. {q.text || t('(ไม่มีข้อความคำถาม)', '(untitled question)')}</b> <span className="muted small">· {answers.length} {t('คำตอบ', 'answers')}</span>
                   {q.type === 'rating' && (
-                    <p className="small">{ratingCounts(answers).map((r) => t(r.label + ' คะแนน: ', r.label + ' pts: ') + r.value).join('  ·  ')}{answers.length > 0 && <> — <b>{t('เฉลี่ย ', 'avg ')}{(answers.reduce((a, b) => a + Number(b), 0) / answers.length).toFixed(2)}</b></>}</p>
+                    <p className="small">{ratingParts.join('  ·  ')}{answers.length > 0 && <> — <b>{t('เฉลี่ย ', 'avg ')}{averageOf(answers).toFixed(2)}</b></>}</p>
                   )}
-                  {q.type === 'choice' && <p className="small">{choiceCounts(q.options, answers).map((c) => c.label + ' ' + c.value + ' (' + percent(c.value, answers.length) + '%)').join('  ·  ')}</p>}
-                  {q.type === 'text' && (answers.length === 0 ? <p className="small muted">{t('ไม่มีความคิดเห็น', 'No comments')}</p> : <ul className="quotes">{answers.slice(0, 8).map((a, k) => <li key={k}>“{a}”</li>)}</ul>)}
+                  {q.type === 'choice' && <p className="small">{choiceParts.join('  ·  ')}</p>}
+                  {q.type === 'text' && answers.length === 0 && <p className="small muted">{t('ไม่มีความคิดเห็น', 'No comments')}</p>}
+                  {q.type === 'text' && answers.length > 0 && <ul className="quotes">{answers.slice(0, 8).map((a, k) => <li key={k}>“{a}”</li>)}</ul>}
                 </div>
               );
             })}
@@ -134,18 +178,22 @@ export default function EventReport({ event, regs: allRegs, responses: allRespon
               <thead><tr><th>#</th><th>{t('ชื่อ', 'Name')}</th><th>{t('หน่วยงาน', 'Organization')}</th><th>{t('ช่องทาง', 'Channel')}</th><th>{t('ลงทะเบียนเมื่อ', 'Registered')}</th><th>{t('สถานะ', 'Status')}</th></tr></thead>
               <tbody>
                 {/* แถวที่เกิน 15 ซ่อนบนจอ แต่ยังพิมพ์ออกมาครบ */}
-                {list.map((r, i) => (
-                  <tr key={r.id} className={!showAll && i >= 15 ? 'print-only-row' : undefined}>
-                    <td className="muted">{i + 1}</td><td><b>{r.name}</b></td><td>{r.org || '-'}</td>
-                    <td>{r.source === 'kiosk' ? 'Kiosk' : t('ออนไลน์', 'Online')}</td>
-                    <td className="small">{formatDate(r.createdAt, lang)}</td>
-                    <td>{r.checkedIn ? <span className="badge ok">{t('เช็คอินแล้ว', 'Checked in')}</span> : <span className="badge">{t('ยังไม่เช็คอิน', 'Not checked in')}</span>}</td>
-                  </tr>
-                ))}
+                {list.map((r, i) => {
+                  let rowClass: string | undefined = undefined;
+                  if (!showAll && i >= 15) rowClass = 'print-only-row';
+                  return (
+                    <tr key={r.id} className={rowClass}>
+                      <td className="muted">{i + 1}</td><td><b>{r.name}</b></td><td>{r.org || '-'}</td>
+                      <td>{r.source === 'kiosk' ? 'Kiosk' : t('ออนไลน์', 'Online')}</td>
+                      <td className="small">{formatDate(r.createdAt, lang)}</td>
+                      <td>{r.checkedIn ? <span className="badge ok">{t('เช็คอินแล้ว', 'Checked in')}</span> : <span className="badge">{t('ยังไม่เช็คอิน', 'Not checked in')}</span>}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
-          {list.length > 15 && <button className="btn small-btn no-print" style={{ marginTop: 10 }} onClick={() => setShowAll(!showAll)}>{showAll ? t('แสดงน้อยลง', 'Show less') : t('แสดงทั้งหมด ', 'Show all ') + list.length}</button>}
+          {list.length > 15 && <button className="btn small-btn no-print" style={{ marginTop: 10 }} onClick={() => setShowAll(!showAll)}>{showAllText}</button>}
         </section>
       </article>
     </div>

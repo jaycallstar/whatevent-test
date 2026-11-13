@@ -17,13 +17,31 @@ export default function MainLayout({ children }: { children: ReactNode }) {
   const { user, ready } = useAuth();
   const router = useRouter();
   const path = usePathname();
+
   // admin ใช้ได้เฉพาะหน้าของ admin / user ใช้ได้เฉพาะหน้าของกิจกรรม
-  const wrongPlace = !!user && (user.role === 'admin' ? !isAdminPath(path) : isAdminPath(path));
+  let wrongPlace = false;
+  if (user) {
+    if (user.role === 'admin') {
+      wrongPlace = !isAdminPath(path);
+    } else {
+      wrongPlace = isAdminPath(path);
+    }
+  }
 
   // ยังไม่ login -> กลับหน้า Login / เข้าหน้าที่ไม่ใช่ของ role ตัวเอง -> พาไปหน้าแรกของ role
   useEffect(() => {
-    if (ready && !user) router.replace('/');
-    else if (ready && user && wrongPlace) router.replace(user.role === 'admin' ? '/events' : '/dashboard');
+    if (!ready) return;
+    if (!user) {
+      router.replace('/');
+      return;
+    }
+    if (wrongPlace) {
+      if (user.role === 'admin') {
+        router.replace('/events');
+      } else {
+        router.replace('/dashboard');
+      }
+    }
   }, [ready, user, wrongPlace, router]);
 
   if (!ready || !user || wrongPlace) return <p className="center-msg">{t('กำลังโหลด...', 'Loading...')}</p>;

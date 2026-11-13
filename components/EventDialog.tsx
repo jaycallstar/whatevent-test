@@ -12,28 +12,62 @@ type Props = { initial: Draft; staff: User[]; editing: boolean; onSave: (d: Draf
 
 export type { Draft as EventDraft };
 
+// ดึงเฉพาะค่าที่แก้ในกล่องนี้ออกมาจากกิจกรรม
 export function draftOf(e: EventItem): Draft {
-  return { title: e.title, startAt: e.startAt, endAt: e.endAt, capacity: e.capacity, access: e.access, userIds: [...e.userIds] };
+  return { title: e.title, startAt: e.startAt, endAt: e.endAt, capacity: e.capacity, access: e.access, userIds: e.userIds.slice() };
 }
 
 export default function EventDialog({ initial, staff, editing, onSave, onClose }: Props) {
   const { t } = useLang();
   const [d, setD] = useState<Draft>(initial);
   const [error, setError] = useState('');
+  const accessList: Access[] = ['closed', 'open'];
 
+  // กด Esc เพื่อปิดกล่อง
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose(); };
-    document.addEventListener('keydown', onKey);
-    return () => document.removeEventListener('keydown', onKey);
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') onClose();
+    }
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
   }, [onClose]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    if (!d.title.trim()) return setError(t('กรุณาใส่ชื่อกิจกรรม', 'Please enter an event name'));
-    if (d.endAt <= d.startAt) return setError(t('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม', 'The end must be after the start'));
+    if (!d.title.trim()) {
+      setError(t('กรุณาใส่ชื่อกิจกรรม', 'Please enter an event name'));
+      return;
+    }
+    if (d.endAt <= d.startAt) {
+      setError(t('เวลาสิ้นสุดต้องอยู่หลังเวลาเริ่ม', 'The end must be after the start'));
+      return;
+    }
     onSave({ ...d, title: d.title.trim() });
   }
-  const toggle = (id: string) => setD({ ...d, userIds: d.userIds.includes(id) ? d.userIds.filter((x) => x !== id) : [...d.userIds, id] });
+
+  // เปลี่ยนเวลาเริ่ม / สิ้นสุด (ถ้าช่องถูกล้างให้ไม่เปลี่ยนค่า)
+  function changeStart(value: string) {
+    if (value) setD({ ...d, startAt: new Date(value).toISOString() });
+  }
+  function changeEnd(value: string) {
+    if (value) setD({ ...d, endAt: new Date(value).toISOString() });
+  }
+
+  // กดเลือก / เอาออก ผู้ดูแลคนหนึ่ง
+  function toggle(id: string) {
+    const next: string[] = [];
+    if (d.userIds.includes(id)) {
+      // มีอยู่แล้ว -> เอาออก
+      for (const x of d.userIds) {
+        if (x !== id) next.push(x);
+      }
+    } else {
+      // ยังไม่มี -> เพิ่มเข้าไป
+      for (const x of d.userIds) next.push(x);
+      next.push(id);
+    }
+    setD({ ...d, userIds: next });
+  }
 
   return (
     <div className="modal-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -44,15 +78,15 @@ export default function EventDialog({ initial, staff, editing, onSave, onClose }
         </div>
         <label>{t('ชื่อกิจกรรม', 'Event name')}<input autoFocus value={d.title} onChange={(e) => setD({ ...d, title: e.target.value })} placeholder={t('เช่น Tech Meetup 2026', 'e.g. Tech Meetup 2026')} /></label>
         <div className="grid">
-          <label>{t('เริ่ม', 'Starts')}<input type="datetime-local" value={toInputValue(d.startAt)} onChange={(e) => e.target.value && setD({ ...d, startAt: new Date(e.target.value).toISOString() })} /></label>
-          <label>{t('สิ้นสุด', 'Ends')}<input type="datetime-local" value={toInputValue(d.endAt)} onChange={(e) => e.target.value && setD({ ...d, endAt: new Date(e.target.value).toISOString() })} /></label>
+          <label>{t('เริ่ม', 'Starts')}<input type="datetime-local" value={toInputValue(d.startAt)} onChange={(e) => changeStart(e.target.value)} /></label>
+          <label>{t('สิ้นสุด', 'Ends')}<input type="datetime-local" value={toInputValue(d.endAt)} onChange={(e) => changeEnd(e.target.value)} /></label>
         </div>
         <div className="grid">
           <label>{t('จำนวนที่นั่ง', 'Capacity')}<input type="number" min={1} value={d.capacity} onChange={(e) => setD({ ...d, capacity: Math.max(1, Number(e.target.value)) })} /></label>
           <div className="stack-sm">
             <span className="field-label">{t('รูปแบบงาน', 'Access')}</span>
             <div className="segmented" role="radiogroup" aria-label={t('รูปแบบงาน', 'Access')}>
-              {(['closed', 'open'] as Access[]).map((a) => (
+              {accessList.map((a) => (
                 <button key={a} type="button" role="radio" aria-checked={d.access === a} className={d.access === a ? 'on' : ''} onClick={() => setD({ ...d, access: a })}>
                   <Icon name={a === 'open' ? 'unlock' : 'lock'} size={15} /> {a === 'open' ? t('งานเปิด', 'Open') : t('งานปิด', 'Closed')}
                 </button>

@@ -19,17 +19,42 @@ export default function ColorField({ label, value, onChange, enabled = true, onT
   const btn = useRef<HTMLButtonElement>(null);
   const rgb = hexToRgb(value);
   const [text, setText] = useState(value.toUpperCase());
-  useEffect(() => { setText(value.toUpperCase()); }, [value]);
-  useEffect(() => { if (!enabled) setOpen(false); }, [enabled]);
+
+  // สีเปลี่ยนจากข้างนอก -> อัปเดตข้อความในช่อง HEX ตาม
+  useEffect(() => {
+    setText(value.toUpperCase());
+  }, [value]);
+
+  // ถ้าสีนี้ถูกปิด ให้ปิดกล่องด้วย
+  useEffect(() => {
+    if (!enabled) setOpen(false);
+  }, [enabled]);
+
+  // คืนโฟกัสให้ปุ่มสี
+  function focusButton() {
+    if (btn.current) btn.current.focus();
+  }
 
   // กดนอกกล่อง หรือกด Esc -> ปิด (Esc คืนโฟกัสให้ปุ่ม)
   useEffect(() => {
     if (!open) return;
-    const down = (e: MouseEvent) => { if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false); };
-    const key = (e: KeyboardEvent) => { if (e.key === 'Escape') { setOpen(false); btn.current?.focus(); } };
-    document.addEventListener('mousedown', down);
-    document.addEventListener('keydown', key);
-    return () => { document.removeEventListener('mousedown', down); document.removeEventListener('keydown', key); };
+
+    function handleMouseDown(e: MouseEvent) {
+      if (wrap.current && !wrap.current.contains(e.target as Node)) setOpen(false);
+    }
+    function handleKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        setOpen(false);
+        focusButton();
+      }
+    }
+
+    document.addEventListener('mousedown', handleMouseDown);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      document.removeEventListener('keydown', handleKey);
+    };
   }, [open]);
 
   // พิมพ์รหัสสีเอง: รับ #RRGGBB หรือ RRGGBB เมื่อครบ 6 หลักจึงเปลี่ยนสีจริง
@@ -40,18 +65,32 @@ export default function ColorField({ label, value, onChange, enabled = true, onT
   }
   const valid = /^#?[0-9a-fA-F]{6}$/.test(text.trim());
 
+  // เปลี่ยนค่าสี 1 ช่อง (i: 0 = R, 1 = G, 2 = B) ให้อยู่ในช่วง 0-255
   function setChannel(i: number, raw: number) {
-    const v = Math.max(0, Math.min(255, Math.round(Number.isFinite(raw) ? raw : 0)));
-    const next = [...rgb];
+    let v = raw;
+    if (!Number.isFinite(v)) v = 0;
+    v = Math.round(v);
+    if (v < 0) v = 0;
+    if (v > 255) v = 255;
+
+    const next = rgb.slice(); // คัดลอกค่าสีเดิม
     next[i] = v;
     onChange(rgbToHex(next[0], next[1], next[2]));
   }
+
   // พื้นแถบเลื่อนไล่จาก 0 ถึง 255 ของช่องนั้น โดยช่องอื่นคงที่ ให้เห็นผลก่อนเลื่อน
-  const track = (i: number) => {
-    const lo = [...rgb], hi = [...rgb];
-    lo[i] = 0; hi[i] = 255;
+  function track(i: number): string {
+    const lo = rgb.slice();
+    const hi = rgb.slice();
+    lo[i] = 0;
+    hi[i] = 255;
     return 'linear-gradient(90deg, rgb(' + lo.join(',') + '), rgb(' + hi.join(',') + '))';
-  };
+  }
+
+  function closeAndFocus() {
+    setOpen(false);
+    focusButton();
+  }
 
   return (
     <div className="color-tile" ref={wrap}>
@@ -98,7 +137,7 @@ export default function ColorField({ label, value, onChange, enabled = true, onT
           </div>
 
           <div className="color-pop-foot">
-            <button type="button" className="btn primary small-btn" onClick={() => { setOpen(false); btn.current?.focus(); }}>{t('เสร็จ', 'Done')}</button>
+            <button type="button" className="btn primary small-btn" onClick={closeAndFocus}>{t('เสร็จ', 'Done')}</button>
           </div>
         </div>
       )}

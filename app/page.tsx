@@ -9,8 +9,10 @@ import { useAuth } from '@/lib/auth';
 import type { Session } from '@/lib/auth';
 import { useLang } from '@/lib/i18n';
 
+// หน้าแรกของแต่ละ role
 function homeFor(user: Session): string {
-  return user.role === 'admin' ? '/events' : '/dashboard';
+  if (user.role === 'admin') return '/events';
+  return '/dashboard';
 }
 
 export default function LoginPage() {
@@ -35,9 +37,12 @@ export default function LoginPage() {
     if (!session) {
       setError(t('ชื่อผู้ใช้หรือรหัสผ่านไม่ถูกต้อง', 'Incorrect username or password'));
       setBusy(false);
-    } else router.replace(homeFor(session));
+    } else {
+      router.replace(homeFor(session));
+    }
   }
 
+  // กดบัญชีทดลองแล้วกรอกให้อัตโนมัติ
   function fill(u: string, p: string) {
     setUsername(u);
     setPassword(p);

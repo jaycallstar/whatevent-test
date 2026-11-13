@@ -21,6 +21,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<Session | null>(null);
   const [ready, setReady] = useState(false);
 
+  // เปิดเว็บครั้งแรก: อ่าน session ที่เคยบันทึกไว้
   useEffect(() => {
     const text = localStorage.getItem(SESSION_KEY);
     if (text) {
@@ -41,8 +42,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function login(username: string, password: string): Session | null {
     const users = readStore<User>('users');
-    const found = users.find((u) => u.username === username.trim() && u.password === password);
-    return found ? saveSession(found) : null;
+    for (const u of users) {
+      if (u.username === username.trim() && u.password === password) {
+        return saveSession(u);
+      }
+    }
+    return null; // หาไม่เจอ = username หรือ password ผิด
   }
 
   function logout() {
@@ -52,9 +57,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   function refresh() {
     if (!user) return;
-    const me = readStore<User>('users').find((u) => u.id === user.id);
-    if (me) saveSession(me);
-    else logout(); // บัญชีถูกลบแล้ว
+    const users = readStore<User>('users');
+    for (const u of users) {
+      if (u.id === user.id) {
+        saveSession(u);
+        return;
+      }
+    }
+    logout(); // หาไม่เจอ = บัญชีถูกลบแล้ว
   }
 
   return <AuthContext.Provider value={{ user, ready, login, logout, refresh }}>{children}</AuthContext.Provider>;

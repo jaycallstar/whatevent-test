@@ -15,14 +15,28 @@ import { brandStyle, formatDate, newTicket, regState } from '@/lib/helpers';
 import { useLang } from '@/lib/i18n';
 import type { EventItem, Registration } from '@/lib/types';
 
+// เติม 0 ข้างหน้าให้เป็นเลข 2 หลัก เช่น 5 -> "05"
+function pad(n: number): string {
+  let text = String(n);
+  if (text.length < 2) text = '0' + text;
+  return text;
+}
+
 // นับถอยหลังจนถึงเวลาที่กำหนด เช่น "2 วัน 03:14:09"
 function useCountdown(target: string) {
   const [now, setNow] = useState(Date.now());
-  useEffect(() => { const id = setInterval(() => setNow(Date.now()), 1000); return () => clearInterval(id); }, []);
+
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+
   const ms = Math.max(0, Date.parse(target || '') - now);
-  const d = Math.floor(ms / 86400000), h = Math.floor(ms / 3600000) % 24, m = Math.floor(ms / 60000) % 60, s = Math.floor(ms / 1000) % 60;
-  const pad = (n: number) => String(n).padStart(2, '0');
-  return { done: ms === 0, d, text: pad(h) + ':' + pad(m) + ':' + pad(s) };
+  const d = Math.floor(ms / 86400000);
+  const h = Math.floor(ms / 3600000) % 24;
+  const m = Math.floor(ms / 60000) % 60;
+  const s = Math.floor(ms / 1000) % 60;
+  return { done: ms === 0, d: d, text: pad(h) + ':' + pad(m) + ':' + pad(s) };
 }
 
 export default function RegisterPage() {
@@ -34,26 +48,50 @@ export default function RegisterPage() {
   const [error, setError] = useState('');
   const [done, setDone] = useState<Registration | null>(null); // ลงทะเบียนสำเร็จแล้วเก็บไว้ที่นี่
   const regText = useRegText();
-  const event = events.find((e) => e.id === params.id);
-  const countdown = useCountdown(event ? event.regOpenAt : '');
+
+  // หากิจกรรมจากรหัสใน URL
+  let found: EventItem | null = null;
+  for (const e of events) {
+    if (e.id === params.id) found = e;
+  }
+  const countdown = useCountdown(found ? found.regOpenAt : '');
 
   if (!ready) return <p className="center-msg">{t('กำลังโหลด...', 'Loading...')}</p>;
-  if (!event) return <p className="center-msg">{t('ไม่พบกิจกรรมนี้ ลิงก์อาจไม่ถูกต้อง', 'Event not found. The link may be incorrect.')}</p>;
-  const eventRegs = regs.filter((r) => r.eventId === event.id);
+  if (!found) return <p className="center-msg">{t('ไม่พบกิจกรรมนี้ ลิงก์อาจไม่ถูกต้อง', 'Event not found. The link may be incorrect.')}</p>;
+  const event: EventItem = found;
+
+  // ผู้ลงทะเบียนของกิจกรรมนี้
+  const eventRegs: Registration[] = [];
+  for (const r of regs) {
+    if (r.eventId === event.id) eventRegs.push(r);
+  }
   const state = regState(event, eventRegs.length);
   const info = regText(state, event);
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+
     // ตรวจสถานะอีกครั้งตอนกดส่ง (กันเปิดหน้าค้างไว้จนเลยเวลาปิดรับ)
-    const latest = readStore<Registration>('registrations').filter((r) => r.eventId === event!.id);
-    const now = regState(event!, latest.length);
-    if (now !== 'open') return setError(regText(now, event!).detail);
-    const duplicated = latest.some((r) => r.email.toLowerCase() === form.email.trim().toLowerCase());
-    if (duplicated) return setError(t('อีเมลนี้ลงทะเบียนกิจกรรมนี้แล้ว', 'This email is already registered for this event'));
+    const latest: Registration[] = [];
+    for (const r of readStore<Registration>('registrations')) {
+      if (r.eventId === event.id) latest.push(r);
+    }
+    const now = regState(event, latest.length);
+    if (now !== 'open') {
+      setError(regText(now, event).detail);
+      return;
+    }
+
+    // อีเมลห้ามซ้ำในกิจกรรมเดียวกัน
+    for (const r of latest) {
+      if (r.email.toLowerCase() === form.email.trim().toLowerCase()) {
+        setError(t('อีเมลนี้ลงทะเบียนกิจกรรมนี้แล้ว', 'This email is already registered for this event'));
+        return;
+      }
+    }
 
     const created: Registration = {
-      id: newId(), eventId: event!.id, name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(), org: form.org.trim(),
+      id: newId(), eventId: event.id, name: form.name.trim(), email: form.email.trim(), phone: form.phone.trim(), org: form.org.trim(),
       ticket: newTicket(), checkedIn: false, createdAt: new Date().toISOString(), source: 'online',
     };
     setRegs([...regs, created]);
@@ -99,14 +137,18 @@ export default function RegisterPage() {
         </div>
       )}
 
-      {done ? (
+      {/* ---------- ลงทะเบียนสำเร็จ ---------- */}
+      {done && (
         <div className="stack">
           <div className="alert ok">{t('ลงทะเบียนสำเร็จ ขอบคุณคุณ ', 'Registration successful. Thank you, ')}{done.name}</div>
           <QRBox title={t('บัตรเข้างาน ', 'Entry ticket ') + done.ticket} text={done.ticket} showLink={false} />
           <p className="muted small center-text">{t('บันทึกภาพหน้าจอหรือดาวน์โหลด QR นี้ไว้แสดงที่หน้างาน หรือสแกนที่ตู้ Kiosk', 'Save a screenshot or download this QR to show at the venue or scan at the kiosk.')}</p>
           {event.questions.length > 0 && <a className="btn big" href={'/survey/' + event.id + '?t=' + encodeURIComponent(done.ticket)}><Icon name="clipboard" size={16} /> {t('ลิงก์แบบสอบถามของคุณ (ตอบหลังจบงาน)', 'Your survey link (answer after the event)')}</a>}
         </div>
-      ) : state === 'open' && (
+      )}
+
+      {/* ---------- ฟอร์มลงทะเบียน (แสดงเมื่อเปิดรับและยังไม่ได้ลงทะเบียน) ---------- */}
+      {!done && state === 'open' && (
         <form className="card stack-sm" onSubmit={handleSubmit}>
           <div className="row between">
             <h2>{t('ลงทะเบียน', 'Register')}</h2>

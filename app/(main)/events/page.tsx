@@ -33,16 +33,77 @@ export default function EventsPage() {
   const [dialog, setDialog] = useState<{ id: string | null; draft: EventDraft } | null>(null);
   if (!user) return null;
 
-  const staff = users.filter((u) => u.role === 'user');
   const now = Date.now();
-  const list = allEvents
-    .filter((e) => e.title.toLowerCase().includes(search.toLowerCase()))
-    .filter((e) => filter === 'all' || (filter === 'upcoming' ? Date.parse(e.endAt) >= now : Date.parse(e.endAt) < now))
-    .sort((a, b) => a.startAt.localeCompare(b.startAt));
 
-  const totalRegs = regs.filter((r) => allEvents.some((e) => e.id === r.eventId)).length;
-  const totalIn = regs.filter((r) => r.checkedIn && allEvents.some((e) => e.id === r.eventId)).length;
-  const unassigned = allEvents.filter((e) => e.userIds.length === 0).length;
+  // ผู้ใช้ที่เป็นผู้ดูแลได้ (role user)
+  const staff: User[] = [];
+  for (const u of users) {
+    if (u.role === 'user') staff.push(u);
+  }
+
+  // กิจกรรมตามคำค้นหาและตัวกรอง (ทั้งหมด / กำลังจะมาถึง / จบแล้ว) เรียงตามวันเริ่ม
+  const list: EventItem[] = [];
+  for (const e of allEvents) {
+    if (!e.title.toLowerCase().includes(search.toLowerCase())) continue;
+    if (filter === 'upcoming' && Date.parse(e.endAt) < now) continue;
+    if (filter === 'past' && Date.parse(e.endAt) >= now) continue;
+    list.push(e);
+  }
+  list.sort((a, b) => a.startAt.localeCompare(b.startAt));
+
+  // มีกิจกรรมนี้อยู่ในระบบไหม (ผู้ลงทะเบียนที่กิจกรรมถูกลบไปแล้วจะไม่นับ)
+  function eventExists(id: string): boolean {
+    for (const e of allEvents) {
+      if (e.id === id) return true;
+    }
+    return false;
+  }
+
+  // ตัวเลขรวมของทุกกิจกรรม
+  let totalRegs = 0;
+  let totalIn = 0;
+  for (const r of regs) {
+    if (!eventExists(r.eventId)) continue;
+    totalRegs++;
+    if (r.checkedIn) totalIn++;
+  }
+
+  let unassigned = 0;
+  let upcomingCount = 0;
+  for (const e of allEvents) {
+    if (e.userIds.length === 0) unassigned++;
+    if (Date.parse(e.endAt) >= now) upcomingCount++;
+  }
+
+  // ผู้ลงทะเบียน / คำตอบ / ผู้ดูแล ของกิจกรรมหนึ่ง
+  function regsOf(eventId: string): Registration[] {
+    const result: Registration[] = [];
+    for (const r of regs) {
+      if (r.eventId === eventId) result.push(r);
+    }
+    return result;
+  }
+  function responsesOf(eventId: string): Response[] {
+    const result: Response[] = [];
+    for (const r of responses) {
+      if (r.eventId === eventId) result.push(r);
+    }
+    return result;
+  }
+  function managersOf(e: EventItem): User[] {
+    const result: User[] = [];
+    for (const u of users) {
+      if (e.userIds.includes(u.id)) result.push(u);
+    }
+    return result;
+  }
+  function countChecked(list: Registration[]): number {
+    let count = 0;
+    for (const r of list) {
+      if (r.checkedIn) count++;
+    }
+    return count;
+  }
 
   function openCreate() {
     const start = new Date(Date.now() + 7 * 24 * 3600 * 1000);
@@ -53,25 +114,61 @@ export default function EventsPage() {
   }
 
   function save(d: EventDraft) {
-    if (dialog && dialog.id) setAllEvents(allEvents.map((e) => (e.id === dialog.id ? { ...e, ...d } : e)));
-    else setAllEvents([...allEvents, normalizeEvent({ id: newId(), ...d })]);
+    if (dialog && dialog.id) {
+      // แก้ไขกิจกรรมเดิม
+      const next: EventItem[] = [];
+      for (const e of allEvents) {
+        if (e.id === dialog.id) {
+          next.push({ ...e, ...d });
+        } else {
+          next.push(e);
+        }
+      }
+      setAllEvents(next);
+    } else {
+      // สร้างกิจกรรมใหม่
+      setAllEvents([...allEvents, normalizeEvent({ id: newId(), ...d })]);
+    }
     setDialog(null);
   }
 
   // ลบกิจกรรม พร้อมข้อมูลผู้ลงทะเบียนและคำตอบของกิจกรรมนั้น
   function deleteEvent(event: EventItem) {
     if (!confirm(t('ลบกิจกรรม “', 'Delete “') + event.title + t('” พร้อมข้อมูลทั้งหมด?', '” and all its data?'))) return;
-    setAllEvents(allEvents.filter((e) => e.id !== event.id));
-    setRegs(regs.filter((r) => r.eventId !== event.id));
-    setResponses(responses.filter((r) => r.eventId !== event.id));
+
+    const nextEvents: EventItem[] = [];
+    for (const e of allEvents) {
+      if (e.id !== event.id) nextEvents.push(e);
+    }
+    setAllEvents(nextEvents);
+
+    const nextRegs: Registration[] = [];
+    for (const r of regs) {
+      if (r.eventId !== event.id) nextRegs.push(r);
+    }
+    setRegs(nextRegs);
+
+    const nextResponses: Response[] = [];
+    for (const r of responses) {
+      if (r.eventId !== event.id) nextResponses.push(r);
+    }
+    setResponses(nextResponses);
   }
 
   // ส่งออกภาพรวมทุกกิจกรรมเป็น Excel
   function exportAll() {
     const rows = [[t('กิจกรรม', 'Event'), t('วันที่เริ่ม', 'Start'), t('รูปแบบ', 'Access'), t('ที่นั่ง', 'Capacity'), t('ผู้ลงทะเบียน', 'Registrants'), t('เช็คอิน', 'Checked in'), t('อัตราเข้างาน (%)', 'Check-in rate (%)'), t('ตอบแบบสอบถาม', 'Responses'), t('คะแนนเฉลี่ย', 'Avg rating'), t('ผู้ดูแล', 'Managers')]];
     for (const e of allEvents) {
-      const s = summarize(e, regs.filter((r) => r.eventId === e.id), responses.filter((r) => r.eventId === e.id));
-      rows.push([e.title, formatDate(e.startAt, lang), e.access === 'open' ? t('งานเปิด', 'Open') : t('งานปิด', 'Closed'), String(e.capacity), String(s.total), String(s.checkedIn), String(s.checkInRate), String(s.responseCount), s.average === null ? '-' : s.average.toFixed(2), users.filter((u) => e.userIds.includes(u.id)).map((u) => u.name).join(', ')]);
+      const s = summarize(e, regsOf(e.id), responsesOf(e.id));
+
+      let accessText = t('งานปิด', 'Closed');
+      if (e.access === 'open') accessText = t('งานเปิด', 'Open');
+      let averageText = '-';
+      if (s.average !== null) averageText = s.average.toFixed(2);
+      const managerNames: string[] = [];
+      for (const u of managersOf(e)) managerNames.push(u.name);
+
+      rows.push([e.title, formatDate(e.startAt, lang), accessText, String(e.capacity), String(s.total), String(s.checkedIn), String(s.checkInRate), String(s.responseCount), averageText, managerNames.join(', ')]);
     }
     downloadExcel('whatevent-overview.xlsx', [{ name: 'Overview', rows }]);
   }
@@ -84,7 +181,7 @@ export default function EventsPage() {
       </PageHeader>
 
       <div className="kpis kpis-4">
-        <Kpi icon="layers" label={t('กิจกรรมทั้งหมด', 'Events')} value={allEvents.length} sub={t('กำลังจะมาถึง ', 'Upcoming ') + allEvents.filter((e) => Date.parse(e.endAt) >= now).length} />
+        <Kpi icon="layers" label={t('กิจกรรมทั้งหมด', 'Events')} value={allEvents.length} sub={t('กำลังจะมาถึง ', 'Upcoming ') + upcomingCount} />
         <Kpi icon="users" label={t('ผู้ลงทะเบียนรวม', 'Total registrants')} value={totalRegs} />
         <Kpi icon="check" label={t('เช็คอินรวม', 'Total check-ins')} value={totalIn} progress={percent(totalIn, totalRegs)} sub={t('อัตราเข้างาน ', 'Rate ') + percent(totalIn, totalRegs) + '%'} />
         <Kpi icon="assign" label={t('ยังไม่มีผู้ดูแล', 'Without a manager')} value={unassigned} sub={unassigned ? t('ไปมอบหมายที่ “มอบหมายผู้ดูแล”', 'Assign in “Admin assignment”') : t('ครบทุกกิจกรรม', 'All covered')} />
@@ -102,10 +199,10 @@ export default function EventsPage() {
       {list.length === 0 && <div className="card empty"><div className="empty-icon"><Icon name="layers" size={26} /></div><p className="muted">{t('ไม่พบกิจกรรม', 'No events found')}</p></div>}
       <div className="cards">
         {list.map((e) => {
-          const eRegs = regs.filter((r) => r.eventId === e.id);
+          const eRegs = regsOf(e.id);
           return (
-            <EventCard key={e.id} event={e} count={eRegs.length} checkedIn={eRegs.filter((r) => r.checkedIn).length}
-              managers={users.filter((u) => e.userIds.includes(u.id))}
+            <EventCard key={e.id} event={e} count={eRegs.length} checkedIn={countChecked(eRegs)}
+              managers={managersOf(e)}
               onEdit={() => setDialog({ id: e.id, draft: draftOf(e) })} onDelete={() => deleteEvent(e)} />
           );
         })}

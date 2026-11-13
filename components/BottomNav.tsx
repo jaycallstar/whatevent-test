@@ -31,9 +31,18 @@ export default function BottomNav() {
 
   // admin: 2 เมนูของ admin / user: 4 เมนูหลักของกิจกรรมอยู่บนแถบ ที่เหลืออยู่ในกล่อง "เพิ่มเติม"
   const isAdmin = user.role === 'admin';
-  const mainItems = isAdmin ? adminNav : eventNav.slice(0, 4);
-  const moreItems = isAdmin ? [] : eventNav.slice(4);
-  const moreActive = moreItems.some((m) => path.startsWith(m.href));
+  let mainItems = eventNav.slice(0, 4);
+  let moreItems = eventNav.slice(4);
+  if (isAdmin) {
+    mainItems = adminNav;
+    moreItems = [];
+  }
+
+  // อยู่ในหน้าของเมนูที่ซ่อนไว้ใน "เพิ่มเติม" หรือเปล่า (ถ้าใช่ ให้ปุ่มเพิ่มเติมเป็นสีเด่น)
+  let moreActive = false;
+  for (const m of moreItems) {
+    if (path.startsWith(m.href)) moreActive = true;
+  }
 
   return (
     <>

@@ -9,7 +9,7 @@ import { useAuth } from '@/lib/auth';
 import { useStore } from '@/lib/db';
 import { useEvents } from '@/lib/eventContext';
 import { useLang } from '@/lib/i18n';
-import type { Registration, Response } from '@/lib/types';
+import type { EventItem, Registration, Response } from '@/lib/types';
 
 export default function ReportDetailPage() {
   const { t } = useLang();
@@ -21,15 +21,29 @@ export default function ReportDetailPage() {
   if (!user || !ready) return <p className="muted">{t('กำลังโหลด...', 'Loading...')}</p>;
   if (user.role !== 'admin') return <div className="alert">{t('เฉพาะ admin เท่านั้นที่เข้าหน้านี้ได้', 'Only admins can open this page')}</div>;
 
-  const event = allEvents.find((e) => e.id === params.id);
+  // หากิจกรรมจากรหัสใน URL
+  let event: EventItem | null = null;
+  for (const e of allEvents) {
+    if (e.id === params.id) event = e;
+  }
   if (!event) return <div className="alert">{t('ไม่พบกิจกรรมนี้', 'Event not found')}</div>;
+
+  // เอาเฉพาะข้อมูลของกิจกรรมนี้
+  const regs: Registration[] = [];
+  for (const r of allRegs) {
+    if (r.eventId === event.id) regs.push(r);
+  }
+  const responses: Response[] = [];
+  for (const r of allResponses) {
+    if (r.eventId === event.id) responses.push(r);
+  }
 
   return (
     <div className="stack">
       <PageHeader title={t('รายงานกิจกรรม', 'Event report')} subtitle={event.title}>
         <Link className="btn" href="/events"><Icon name="chevron-left" size={16} /> {t('กลับไปกิจกรรมทั้งหมด', 'Back to all events')}</Link>
       </PageHeader>
-      <EventReport event={event} regs={allRegs.filter((r) => r.eventId === event.id)} responses={allResponses.filter((r) => r.eventId === event.id)} />
+      <EventReport event={event} regs={regs} responses={responses} />
     </div>
   );
 }

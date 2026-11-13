@@ -2,14 +2,28 @@
 import { readStore } from './db';
 import type { Registration } from './types';
 
-const digits = (s: string) => s.replace(/\D/g, '');
+// เอาเฉพาะตัวเลขออกมา เช่น "081-234-5678" -> "0812345678"
+function digits(s: string): string {
+  return s.replace(/\D/g, '');
+}
 
 export function findRegistration(eventId: string, raw: string): Registration | null {
   const value = raw.trim();
   if (!value) return null;
+
   const all = readStore<Registration>('registrations');
-  return all.find((r) => r.eventId === eventId && (
-    r.ticket.toUpperCase() === value.toUpperCase() ||
-    (!!r.email && r.email.toLowerCase() === value.toLowerCase()) ||
-    (digits(value).length >= 9 && digits(r.phone) === digits(value)))) || null;
+  for (const r of all) {
+    // ดูเฉพาะผู้ลงทะเบียนของงานนี้
+    if (r.eventId !== eventId) continue;
+
+    // 1) ตรงกับรหัสบัตร
+    if (r.ticket.toUpperCase() === value.toUpperCase()) return r;
+
+    // 2) ตรงกับอีเมล
+    if (r.email && r.email.toLowerCase() === value.toLowerCase()) return r;
+
+    // 3) ตรงกับเบอร์โทร (ต้องพิมพ์ตัวเลขอย่างน้อย 9 ตัว)
+    if (digits(value).length >= 9 && digits(r.phone) === digits(value)) return r;
+  }
+  return null;
 }

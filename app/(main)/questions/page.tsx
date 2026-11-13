@@ -2,6 +2,7 @@
 // แบบสอบถาม: ออกแบบให้ใช้ง่าย — การ์ดชนิดคำถาม, แก้ตัวเลือกทีละช่อง, เลื่อนขึ้น/ลง, ทำซ้ำ
 // และมีตัวอย่างหน้าที่ผู้ตอบเห็นแบบสด (จอใหญ่เห็นคู่กัน / จอเล็กกดสลับ) · บันทึกอัตโนมัติ
 import { useState } from 'react';
+import type { KeyboardEvent as ReactKeyboardEvent } from 'react';
 import Link from 'next/link';
 import { Segmented } from '@/components/Controls';
 import Icon from '@/components/Icon';
@@ -13,6 +14,15 @@ import { brandStyle } from '@/lib/helpers';
 import { useLang } from '@/lib/i18n';
 import type { Question, QuestionType, Response } from '@/lib/types';
 
+// ตัวเลือกที่ไม่ว่าง (ตัดช่องว่างหน้าหลังแล้วยังมีตัวอักษร)
+function filledOptions(q: Question): string[] {
+  const result: string[] = [];
+  for (const o of q.options) {
+    if (o.trim()) result.push(o);
+  }
+  return result;
+}
+
 export default function QuestionsPage() {
   const { t } = useLang();
   const { current, updateCurrent } = useEvents();
@@ -23,56 +33,121 @@ export default function QuestionsPage() {
   if (!current) return <NoEvent />;
   const event = current;
   const qs = event.questions;
-  const count = responses.filter((r) => r.eventId === event.id).length;
+
+  // จำนวนคนที่ตอบแล้ว
+  let count = 0;
+  for (const r of responses) {
+    if (r.eventId === event.id) count++;
+  }
 
   const types: { type: QuestionType; icon: string; name: string; desc: string }[] = [
     { type: 'rating', icon: 'star', name: t('ให้คะแนน 1–5', 'Rating 1–5'), desc: t('วัดความพึงพอใจด้วยดาว', 'Measure satisfaction with stars') },
     { type: 'choice', icon: 'list', name: t('เลือกตอบ', 'Multiple choice'), desc: t('ให้เลือก 1 คำตอบจากตัวเลือก', 'Pick one answer from options') },
     { type: 'text', icon: 'type', name: t('พิมพ์ตอบ', 'Free text'), desc: t('ความคิดเห็น/ข้อเสนอแนะ', 'Comments and suggestions') },
   ];
-  const typeOf = (q: Question) => types.find((x) => x.type === q.type)!;
 
-  const save = (list: Question[]) => updateCurrent({ ...event, questions: list });
-  const update = (id: string, changes: Partial<Question>) => save(qs.map((q) => (q.id === id ? { ...q, ...changes } : q)));
+  // หาข้อมูลของชนิดคำถาม (ชื่อ ไอคอน)
+  function typeOf(q: Question) {
+    for (const x of types) {
+      if (x.type === q.type) return x;
+    }
+    return types[0];
+  }
+
+  function save(list: Question[]) {
+    updateCurrent({ ...event, questions: list });
+  }
+
+  // แก้บางค่าของคำถามข้อหนึ่ง
+  function update(id: string, changes: Partial<Question>) {
+    const next: Question[] = [];
+    for (const q of qs) {
+      if (q.id === id) {
+        next.push({ ...q, ...changes });
+      } else {
+        next.push(q);
+      }
+    }
+    save(next);
+  }
 
   function add(type: QuestionType) {
-    const q: Question = { id: newId(), text: '', type, options: type === 'choice' ? [t('ตัวเลือก 1', 'Option 1'), t('ตัวเลือก 2', 'Option 2')] : [] };
+    let options: string[] = [];
+    if (type === 'choice') options = [t('ตัวเลือก 1', 'Option 1'), t('ตัวเลือก 2', 'Option 2')];
+    const q: Question = { id: newId(), text: '', type: type, options: options };
     save([...qs, q]);
     setFocus(q.id + ':q');
   }
+
+  // เปลี่ยนชนิดคำถาม (ถ้าเปลี่ยนเป็นเลือกตอบและยังไม่มีตัวเลือก ให้ใส่ตัวเลือกเริ่มต้น 2 ข้อ)
   function changeType(q: Question, type: QuestionType) {
-    update(q.id, { type, options: type === 'choice' && q.options.filter((o) => o).length === 0 ? [t('ตัวเลือก 1', 'Option 1'), t('ตัวเลือก 2', 'Option 2')] : q.options });
+    let options = q.options;
+    if (type === 'choice') {
+      let filled = 0;
+      for (const o of q.options) {
+        if (o) filled++;
+      }
+      if (filled === 0) options = [t('ตัวเลือก 1', 'Option 1'), t('ตัวเลือก 2', 'Option 2')];
+    }
+    update(q.id, { type: type, options: options });
   }
+
+  // เลื่อนคำถามขึ้น (dir = -1) หรือลง (dir = 1)
   function move(index: number, dir: -1 | 1) {
-    const next = [...qs];
-    const [item] = next.splice(index, 1);
+    const next = qs.slice();
+    const item = next.splice(index, 1)[0];
     next.splice(index + dir, 0, item);
     save(next);
   }
+
   function duplicate(index: number) {
-    const next = [...qs];
-    next.splice(index + 1, 0, { ...qs[index], id: newId(), options: [...qs[index].options] });
+    const next = qs.slice();
+    next.splice(index + 1, 0, { ...qs[index], id: newId(), options: qs[index].options.slice() });
     save(next);
   }
+
   function remove(q: Question) {
     if (q.text && !confirm(t('ลบคำถาม “', 'Delete “') + q.text + '”?')) return;
-    save(qs.filter((x) => x.id !== q.id));
+    const next: Question[] = [];
+    for (const x of qs) {
+      if (x.id !== q.id) next.push(x);
+    }
+    save(next);
   }
+
   // ----- ตัวเลือกของคำถามแบบเลือกตอบ -----
   function setOption(q: Question, i: number, value: string) {
-    const options = [...q.options];
+    const options = q.options.slice();
     options[i] = value;
-    update(q.id, { options });
+    update(q.id, { options: options });
   }
+
   function addOption(q: Question, at = q.options.length) {
-    const options = [...q.options];
+    const options = q.options.slice();
     options.splice(at, 0, '');
-    update(q.id, { options });
+    update(q.id, { options: options });
     setFocus(q.id + ':' + at);
   }
+
   function removeOption(q: Question, i: number) {
-    update(q.id, { options: q.options.filter((_, k) => k !== i) });
+    const options: string[] = [];
+    for (let k = 0; k < q.options.length; k++) {
+      if (k !== i) options.push(q.options[k]);
+    }
+    update(q.id, { options: options });
   }
+
+  // กด Enter ในช่องตัวเลือก = เพิ่มตัวเลือกถัดไป
+  function handleOptionKey(e: ReactKeyboardEvent<HTMLInputElement>, q: Question, i: number) {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      addOption(q, i + 1);
+    }
+  }
+
+  // ข้อความแจ้งเรื่องรูปแบบงาน (งานเปิด / งานปิด)
+  let accessText = t('งานปิด: ผู้ตอบต้องยืนยันว่าลงทะเบียนแล้ว (รหัสบัตร / อีเมล / เบอร์โทร) และตอบได้คนละ 1 ครั้ง', 'Closed event: respondents must verify their registration (ticket / email / phone) and can answer once');
+  if (event.access === 'open') accessText = t('งานเปิด: ใครก็ตอบได้ทันทีเมื่อสแกน QR แบบสอบถาม', 'Open event: anyone can answer right after scanning the survey QR');
 
   return (
     <div className="stack">
@@ -81,7 +156,7 @@ export default function QuestionsPage() {
         <a className="btn" href={'/survey/' + event.id} target="_blank" rel="noreferrer"><Icon name="external" size={16} /> {t('เปิดหน้าแบบสอบถาม', 'Open survey')}</a>
       </PageHeader>
 
-      <div className="alert info"><Icon name={event.access === 'open' ? 'unlock' : 'lock'} size={16} /> {event.access === 'open' ? t('งานเปิด: ใครก็ตอบได้ทันทีเมื่อสแกน QR แบบสอบถาม', 'Open event: anyone can answer right after scanning the survey QR') : t('งานปิด: ผู้ตอบต้องยืนยันว่าลงทะเบียนแล้ว (รหัสบัตร / อีเมล / เบอร์โทร) และตอบได้คนละ 1 ครั้ง', 'Closed event: respondents must verify their registration (ticket / email / phone) and can answer once')}</div>
+      <div className="alert info"><Icon name={event.access === 'open' ? 'unlock' : 'lock'} size={16} /> {accessText}</div>
       {count > 0 && <div className="alert info"><Icon name="info" size={16} /> {t('มีคนตอบแล้ว การเปลี่ยนชนิดหรือลบคำถามจะทำให้ผลของข้อนั้นไม่ตรงกับคำตอบเดิม', 'People have already answered. Changing the type or deleting a question can make earlier answers mismatch.')}</div>}
 
       <div className="view-switch">
@@ -101,7 +176,7 @@ export default function QuestionsPage() {
 
           {qs.map((q, index) => {
             const info = typeOf(q);
-            const filled = q.options.filter((o) => o.trim()).length;
+            const filled = filledOptions(q).length;
             return (
               <div key={q.id} className="card q-card">
                 <div className="q-head">
@@ -135,7 +210,7 @@ export default function QuestionsPage() {
                         <span className="opt-dot" aria-hidden />
                         <input value={o} autoFocus={focus === q.id + ':' + i} placeholder={t('ตัวเลือก ', 'Option ') + (i + 1)} aria-label={t('ตัวเลือก ', 'Option ') + (i + 1)}
                           onChange={(e) => setOption(q, i, e.target.value)}
-                          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addOption(q, i + 1); } }} />
+                          onKeyDown={(e) => handleOptionKey(e, q, i)} />
                         <button className="icon-btn ghost" onClick={() => removeOption(q, i)} aria-label={t('ลบตัวเลือก', 'Remove option')}><Icon name="x" size={15} /></button>
                       </div>
                     ))}
@@ -179,7 +254,7 @@ export default function QuestionsPage() {
                     </button>
                   ))}</div>
                 )}
-                {q.type === 'choice' && q.options.filter((o) => o.trim()).map((o) => (
+                {q.type === 'choice' && filledOptions(q).map((o) => (
                   <label key={o} className="check-row opt-pick"><input type="radio" name={'pv-' + q.id} checked={answers[q.id] === o} onChange={() => setAnswers({ ...answers, [q.id]: o })} /> {o}</label>
                 ))}
                 {q.type === 'text' && <textarea rows={2} placeholder={t('พิมพ์คำตอบ...', 'Type your answer...')} />}

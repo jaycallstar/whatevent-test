@@ -18,26 +18,53 @@ export default function RegistrantsPage() {
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('all'); // all / in / out
   if (!current) return <NoEvent />;
+  const event = current;
 
-  const regs = allRegs.filter((r) => r.eventId === current.id);
+  // ผู้ลงทะเบียนของกิจกรรมนี้
+  const regs: Registration[] = [];
+  for (const r of allRegs) {
+    if (r.eventId === event.id) regs.push(r);
+  }
+
+  // กรองตามสถานะเช็คอิน และตามคำค้นหา
   const text = search.toLowerCase();
-  const list = regs.filter((r) => {
-    if (status === 'in' && !r.checkedIn) return false;
-    if (status === 'out' && r.checkedIn) return false;
-    return (r.name + r.email + r.phone + r.org + r.ticket).toLowerCase().includes(text);
-  });
+  const list: Registration[] = [];
+  for (const r of regs) {
+    if (status === 'in' && !r.checkedIn) continue;
+    if (status === 'out' && r.checkedIn) continue;
+    if ((r.name + r.email + r.phone + r.org + r.ticket).toLowerCase().includes(text)) list.push(r);
+  }
 
+  // เช็คอิน / ยกเลิกเช็คอิน
   function toggleCheckIn(reg: Registration) {
-    setAllRegs(allRegs.map((r) => (r.id === reg.id ? { ...r, checkedIn: !r.checkedIn, checkedInAt: r.checkedIn ? undefined : new Date().toISOString() } : r)));
+    const next: Registration[] = [];
+    for (const r of allRegs) {
+      if (r.id !== reg.id) {
+        next.push(r);
+        continue;
+      }
+      // กลับค่าเช็คอิน (ถ้าเช็คอินอยู่ -> ยกเลิกและล้างเวลา / ถ้ายังไม่เช็คอิน -> เช็คอินและบันทึกเวลา)
+      let checkedInAt: string | undefined = new Date().toISOString();
+      if (r.checkedIn) checkedInAt = undefined;
+      next.push({ ...r, checkedIn: !r.checkedIn, checkedInAt: checkedInAt });
+    }
+    setAllRegs(next);
   }
+
   function remove(reg: Registration) {
-    if (confirm(t('ลบ ', 'Delete ') + reg.name + '?')) setAllRegs(allRegs.filter((r) => r.id !== reg.id));
+    if (!confirm(t('ลบ ', 'Delete ') + reg.name + '?')) return;
+    const next: Registration[] = [];
+    for (const r of allRegs) {
+      if (r.id !== reg.id) next.push(r);
+    }
+    setAllRegs(next);
   }
-  const file = safeName(current.title) + '-registrants';
+
+  const file = safeName(event.title) + '-registrants';
 
   return (
     <div className="stack">
-      <PageHeader title={t('ผู้ลงทะเบียน', 'Registrants')} subtitle={current.title + ' · ' + regs.length + ' ' + t('คน', 'people')}>
+      <PageHeader title={t('ผู้ลงทะเบียน', 'Registrants')} subtitle={event.title + ' · ' + regs.length + ' ' + t('คน', 'people')}>
         <button className="btn" onClick={() => downloadCsv(file + '.csv', registrantRows(regs, t, lang))}><Icon name="download" size={16} /> CSV</button>
         <button className="btn primary" onClick={() => downloadExcel(file + '.xlsx', [{ name: 'Registrants', rows: registrantRows(regs, t, lang) }])}><Icon name="download" size={16} /> Excel</button>
       </PageHeader>

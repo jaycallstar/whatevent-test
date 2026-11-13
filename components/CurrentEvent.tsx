@@ -8,6 +8,7 @@ import { formatDate, secondColor } from '@/lib/helpers';
 import { useLang } from '@/lib/i18n';
 import type { EventItem } from '@/lib/types';
 
+// โลโก้กลม ๆ ของกิจกรรม (ไม่มีรูปโลโก้ ใช้ตัวอักษรแรกของชื่อแทน)
 function Logo({ event }: { event: EventItem }) {
   return (
     <span className="sw-logo" style={{ background: 'linear-gradient(135deg,' + event.color + ',' + secondColor(event) + ')' }}>
@@ -23,26 +24,30 @@ export default function CurrentEvent() {
   if (!current) return <p className="ce-empty small muted">{t('ยังไม่ได้รับมอบหมายกิจกรรม', 'No event assigned yet')}</p>;
 
   const many = events.length > 1;
-  const body = (e: EventItem) => (
-    <>
-      <Logo event={e} />
-      <span className="sw-text">
-        <b className="ellipsis">{e.title}</b>
-        <small className="ellipsis">{formatDate(e.startAt, lang)}</small>
-      </span>
-    </>
-  );
+
+  // เนื้อในของการ์ดกิจกรรม 1 ใบ (โลโก้ + ชื่อ + วันที่)
+  function eventBody(e: EventItem) {
+    return (
+      <>
+        <Logo event={e} />
+        <span className="sw-text">
+          <b className="ellipsis">{e.title}</b>
+          <small className="ellipsis">{formatDate(e.startAt, lang)}</small>
+        </span>
+      </>
+    );
+  }
 
   return (
     <div className="ce">
       <p className="sb-label">{many ? t('กิจกรรมของฉัน', 'My events') : t('กิจกรรมที่ดูแล', 'My event')}</p>
-      {!many && <div className="ce-item on">{body(current)}</div>}
+      {!many && <div className="ce-item on">{eventBody(current)}</div>}
       {many && (
         <ul className="ce-list">
           {events.map((e) => (
             <li key={e.id}>
               <button type="button" className={e.id === current.id ? 'ce-item on' : 'ce-item'} aria-pressed={e.id === current.id} onClick={() => setCurrentId(e.id)}>
-                {body(e)}
+                {eventBody(e)}
                 {e.id === current.id && <Icon name="check" size={16} />}
               </button>
             </li>

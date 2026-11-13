@@ -36,16 +36,45 @@ export default function EventAnalytics({ event, regs, responses, days }: Props) 
 
   const weekdayLabels = [t('อา.', 'Sun'), t('จ.', 'Mon'), t('อ.', 'Tue'), t('พ.', 'Wed'), t('พฤ.', 'Thu'), t('ศ.', 'Fri'), t('ส.', 'Sat')];
   const slotLabels = ['00–06', '06–12', '12–18', '18–24'];
-  const orgs = groupCount(regs.map((r) => r.org), 5);
-  const kiosk = regs.filter((r) => r.source === 'kiosk').length;
 
-  const latest = [...regs].sort((a, b) => b.createdAt.localeCompare(a.createdAt)).slice(0, 5);
+  // รวมชื่อหน่วยงาน และนับคนที่ลงทะเบียนผ่าน Kiosk
+  const orgNames: string[] = [];
+  let kiosk = 0;
+  for (const r of regs) {
+    orgNames.push(r.org);
+    if (r.source === 'kiosk') kiosk++;
+  }
+  const orgs = groupCount(orgNames, 5);
+
+  // ผู้ลงทะเบียนล่าสุด 5 คน (เรียงจากใหม่ไปเก่า)
+  const sorted = regs.slice();
+  sorted.sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  const latest = sorted.slice(0, 5);
+
+  // ตัวเลขยอดสะสม 10 วัน ใช้วาดเส้นเล็ก ๆ ในการ์ด KPI
+  const sparkValues: number[] = [];
+  for (const d of cumulative(regs, 10, lang)) {
+    sparkValues.push(d.value);
+  }
+
+  // งานเปิดใช้คำว่า "ผู้ลงชื่อเข้างาน" ส่วนงานปิดใช้ "ผู้ลงทะเบียน"
+  let regLabel = t('ผู้ลงทะเบียน', 'Registrants');
+  if (event.access === 'open') regLabel = t('ผู้ลงชื่อเข้างาน', 'Signed in');
+
+  let trendHint = t('ผู้ลงทะเบียนใหม่แต่ละวัน', 'New sign-ups each day');
+  if (trend === 'cumulative') trendHint = t('ยอดสะสมในช่วงที่เลือก', 'Running total over the selected period');
+
+  const steps = [
+    { label: t('ลงทะเบียน', 'Registered'), value: s.total },
+    { label: t('เช็คอิน', 'Checked in'), value: s.checkedIn },
+    { label: t('ตอบแบบสอบถาม', 'Answered survey'), value: s.responseCount },
+  ];
 
   return (
     <div className="dash">
       {/* ---- 1) ตัวเลขสรุป ---- */}
       <div className="kpis kpis-3">
-        <Kpi icon="users" label={event.access === 'open' ? t('ผู้ลงชื่อเข้างาน', 'Signed in') : t('ผู้ลงทะเบียน', 'Registrants')} value={s.total} spark={cumulative(regs, 10, lang).map((d) => d.value)} progress={s.capacityPercent} sub={s.capacityPercent + '% ' + t('ของ ', 'of ') + event.capacity + ' · ' + t('วันนี้ +', 'today +') + s.today} />
+        <Kpi icon="users" label={regLabel} value={s.total} spark={sparkValues} progress={s.capacityPercent} sub={s.capacityPercent + '% ' + t('ของ ', 'of ') + event.capacity + ' · ' + t('วันนี้ +', 'today +') + s.today} />
         <Kpi icon="check" label={t('เช็คอินแล้ว', 'Checked in')} value={s.checkedIn} progress={s.checkInRate} sub={t('อัตราการเข้างาน ', 'Check-in rate ') + s.checkInRate + '%'} />
         <Kpi icon="clipboard" label={t('ตอบแบบสอบถาม', 'Survey responses')} value={s.responseCount} progress={s.responseRate} sub={t('อัตราการตอบ ', 'Response rate ') + s.responseRate + '%'} />
       </div>
@@ -57,11 +86,12 @@ export default function EventAnalytics({ event, regs, responses, days }: Props) 
             <div className="card-head">
               <div>
                 <h3>{t('แนวโน้มการลงทะเบียน', 'Registration trend')}</h3>
-                <p className="hint">{trend === 'cumulative' ? t('ยอดสะสมในช่วงที่เลือก', 'Running total over the selected period') : t('ผู้ลงทะเบียนใหม่แต่ละวัน', 'New sign-ups each day')}</p>
+                <p className="hint">{trendHint}</p>
               </div>
               <Segmented label={t('ชนิดกราฟ', 'Chart type')} value={trend} onChange={setTrend} options={[{ value: 'cumulative', label: t('สะสม', 'Total') }, { value: 'daily', label: t('รายวัน', 'Daily') }]} />
             </div>
-            {trend === 'cumulative' ? <LineChart id={'cum-' + event.id} data={cumulative(regs, days, lang)} /> : <BarChart data={countByDay(regs, days, lang).slice(-14)} />}
+            {trend === 'cumulative' && <LineChart id={'cum-' + event.id} data={cumulative(regs, days, lang)} />}
+            {trend === 'daily' && <BarChart data={countByDay(regs, days, lang).slice(-14)} />}
           </div>
 
           <div className="card span-4 stack-sm">
@@ -75,11 +105,7 @@ export default function EventAnalytics({ event, regs, responses, days }: Props) 
               </ul>
             </div>
             <div className="steps">
-              {[
-                { label: t('ลงทะเบียน', 'Registered'), value: s.total },
-                { label: t('เช็คอิน', 'Checked in'), value: s.checkedIn },
-                { label: t('ตอบแบบสอบถาม', 'Answered survey'), value: s.responseCount },
-              ].map((st, i) => (
+              {steps.map((st, i) => (
                 <div key={st.label} className="step-row">
                   <span className="step-n">{i + 1}</span>
                   <span className="step-l">{st.label}</span>

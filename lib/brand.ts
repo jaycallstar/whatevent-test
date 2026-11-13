@@ -10,8 +10,12 @@ export const fonts = [
   { key: 'mitr', name: 'Mitr', css: "'Mitr', sans-serif", q: 'Mitr:wght@400;500' },
 ];
 
+// หาฟอนต์จากรหัส ถ้าไม่เจอใช้ตัวแรก
 export function fontOf(key: string) {
-  return fonts.find((f) => f.key === key) || fonts[0];
+  for (const f of fonts) {
+    if (f.key === key) return f;
+  }
+  return fonts[0];
 }
 
 // โหลดฟอนต์จาก Google Fonts เฉพาะตัวที่ใช้ (โหลดครั้งเดียว)
@@ -35,17 +39,34 @@ export function defaultKiosk(): KioskSettings {
   return { bg: 'brand', image: '', walkIn: true, showStats: true, idle: 30 };
 }
 
-// สีรองเริ่มต้น: ผสมสีหลักกับกรมท่าธีมเว็บ 50% ได้เฉดเข้มที่เข้ากัน (ใช้เป็นค่าตั้งต้น ผู้ใช้เปลี่ยนเองได้ในหน้าแบรนด์)
-export function secondOf(hex: string): string {
-  const n = parseInt(hex.replace('#', ''), 16);
-  const base = [(n >> 16) & 255, (n >> 8) & 255, n & 255];
-  const navy = [0x16, 0x24, 0x4f];
-  return '#' + base.map((v, i) => Math.round(v * 0.5 + navy[i] * 0.5).toString(16).padStart(2, '0')).join('');
+// แปลงตัวเลข 0-255 เป็นเลขฐาน 16 สองหลัก เช่น 10 -> "0a"
+function toHex2(v: number): string {
+  let h = Math.round(v).toString(16);
+  if (h.length < 2) h = '0' + h;
+  return h;
 }
 
+// สีรองเริ่มต้น: ผสมสีหลักกับกรมท่าธีมเว็บ 50% ได้เฉดเข้มที่เข้ากัน (ใช้เป็นค่าตั้งต้น ผู้ใช้เปลี่ยนเองได้ในหน้าแบรนด์)
+// (ไม่เรียก hexToRgb จาก helpers.ts เพราะ helpers.ts import ไฟล์นี้อยู่แล้ว จะวนกันเอง)
+export function secondOf(hex: string): string {
+  const clean = hex.replace('#', '');
+  const r = parseInt(clean.slice(0, 2), 16);
+  const g = parseInt(clean.slice(2, 4), 16);
+  const b = parseInt(clean.slice(4, 6), 16);
+
+  // สีกรมท่า #16244f
+  const navyR = 0x16;
+  const navyG = 0x24;
+  const navyB = 0x4f;
+
+  return '#' + toHex2(r * 0.5 + navyR * 0.5) + toHex2(g * 0.5 + navyG * 0.5) + toHex2(b * 0.5 + navyB * 0.5);
+}
+
+// เลือกเฉพาะค่าธีมที่ใช้ได้จริง (ค่าที่ผิดรูปแบบจะถูกทิ้ง)
 function pickTheme(t?: Partial<BrandTheme>): Partial<BrandTheme> {
   if (!t) return {};
   const out: Partial<BrandTheme> = {};
+  // สีรองต้องเป็นรูปแบบ #rrggbb เท่านั้น
   if (t.accent2 && /^#[0-9a-fA-F]{6}$/.test(t.accent2)) out.accent2 = t.accent2.toLowerCase();
   if (typeof t.useSecondary === 'boolean') out.useSecondary = t.useSecondary;
   if (t.font) out.font = t.font;
@@ -58,6 +79,7 @@ function pickTheme(t?: Partial<BrandTheme>): Partial<BrandTheme> {
 export function normalizeEvent(e: Partial<EventItem> & { id: string }): EventItem {
   const color = e.color || '#4a74ff';
   return {
+    // ค่าเริ่มต้น (ถ้า e มีค่าของตัวเอง จะไปทับค่าเหล่านี้ที่ ...e)
     title: '', description: '', startAt: new Date().toISOString(), endAt: new Date().toISOString(), capacity: 100,
     location: '', address: '', directions: '', logo: '', banner: '', userIds: [], questions: [],
     access: 'closed', regOpenAt: '', regCloseAt: '', regPaused: false,

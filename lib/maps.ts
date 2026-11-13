@@ -4,18 +4,35 @@
 // ต้องเปิดใช้ Maps JavaScript API และ Places API (New) ในโปรเจกต์ Google Cloud
 export const GOOGLE_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY;
 
+// เก็บสถานะการโหลดไว้ จะได้ไม่โหลดซ้ำหลายรอบ
 let googleLoading: Promise<any> | null = null;
+
 export function loadGoogle(): Promise<any> {
+  // เคยสั่งโหลดไปแล้ว -> ใช้ตัวเดิม
   if (googleLoading) return googleLoading;
+
   googleLoading = new Promise((resolve, reject) => {
     const w = window as any;
-    if (w.google && w.google.maps && w.google.maps.importLibrary) return resolve(w.google);
+
+    // ถ้า Google Maps ถูกโหลดอยู่แล้ว ใช้ได้เลย
+    if (w.google && w.google.maps && w.google.maps.importLibrary) {
+      resolve(w.google);
+      return;
+    }
+
+    // ยังไม่มี -> สร้างแท็ก <script> แล้วใส่ลงในหน้าเว็บ
     const script = document.createElement('script');
     script.src = 'https://maps.googleapis.com/maps/api/js?key=' + GOOGLE_KEY + '&loading=async&language=th&v=weekly';
     script.async = true;
-    script.onload = () => resolve(w.google);
-    script.onerror = () => { googleLoading = null; reject(new Error('load')); };
+    script.onload = () => {
+      resolve(w.google);
+    };
+    script.onerror = () => {
+      googleLoading = null; // โหลดไม่สำเร็จ ให้ลองใหม่ได้ภายหลัง
+      reject(new Error('load'));
+    };
     document.head.appendChild(script);
   });
+
   return googleLoading;
 }

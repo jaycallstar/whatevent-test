@@ -11,7 +11,16 @@ type Props = { event: EventItem; count: number; checkedIn: number; managers: Use
 
 export default function EventCard({ event, count, checkedIn, managers, onEdit, onDelete }: Props) {
   const { lang, t } = useLang();
+
+  // เปอร์เซ็นต์ที่นั่งที่ถูกจอง (ไม่เกิน 100)
   const pct = Math.min(100, Math.round((count / Math.max(1, event.capacity)) * 100));
+
+  // ข้อความชื่อผู้ดูแล (ถ้าไม่มีใครดูแลให้บอกว่ายังไม่มี)
+  const names: string[] = [];
+  for (const u of managers) names.push(u.name);
+  let managerText = t('ยังไม่มีผู้ดูแล', 'No manager');
+  if (names.length > 0) managerText = names.join(', ');
+
   return (
     <div className="card event-card">
       <div className="event-card-head" style={heroStyle(event)}>
@@ -31,7 +40,7 @@ export default function EventCard({ event, count, checkedIn, managers, onEdit, o
         <div className="track" aria-hidden><div className="fill" style={{ width: pct + '%' }} /></div>
         <div className="row between" style={{ gap: 8 }}>
           <RegBadge event={event} count={count} />
-          <span className="small muted">{managers.length ? managers.map((u) => u.name).join(', ') : t('ยังไม่มีผู้ดูแล', 'No manager')}</span>
+          <span className="small muted">{managerText}</span>
         </div>
         <div className="ec-actions">
           <Link className="btn small-btn primary" href={'/reports/' + event.id}><Icon name="file" size={15} /> {t('รายงาน', 'Report')}</Link>

@@ -26,12 +26,18 @@ export default function SurveyPage() {
   const [code, setCode] = useState(''); // งานปิด: รหัสบัตร/อีเมล/เบอร์โทร ที่กรอก
   const [person, setPerson] = useState<Registration | null>(null); // งานปิด: ผู้ลงทะเบียนที่ยืนยันแล้ว
 
+  // อ่านค่าจากลิงก์ (?from=kiosk และ ?t=รหัสบัตร)
   useEffect(() => {
     const q = new URLSearchParams(window.location.search);
     setFromKiosk(q.get('from') === 'kiosk');
     const ticket = q.get('t');
-    if (ticket) { setCode(ticket); setPerson(findRegistration(params.id, ticket)); }
+    if (ticket) {
+      setCode(ticket);
+      setPerson(findRegistration(params.id, ticket));
+    }
   }, [params.id]);
+
+  // มาจากตู้ Kiosk และส่งเสร็จแล้ว -> รอ 8 วินาทีแล้วพากลับหน้า Kiosk
   useEffect(() => {
     if (!sent || !fromKiosk) return;
     const id = setTimeout(() => window.location.assign('/k/' + params.id), 8000);
@@ -39,16 +45,45 @@ export default function SurveyPage() {
   }, [sent, fromKiosk, params.id]);
 
   if (!ready) return <p className="center-msg">{t('กำลังโหลด...', 'Loading...')}</p>;
-  const event = events.find((e) => e.id === params.id);
-  if (!event) return <p className="center-msg">{t('ไม่พบกิจกรรมนี้ ลิงก์อาจไม่ถูกต้อง', 'Event not found. The link may be incorrect.')}</p>;
+
+  // หากิจกรรมจากรหัสใน URL
+  let found: EventItem | null = null;
+  for (const e of events) {
+    if (e.id === params.id) found = e;
+  }
+  if (!found) return <p className="center-msg">{t('ไม่พบกิจกรรมนี้ ลิงก์อาจไม่ถูกต้อง', 'Event not found. The link may be incorrect.')}</p>;
+  const event: EventItem = found;
 
   const closed = event.access === 'closed';
-  const answered = !!person && responses.some((r) => r.eventId === event.id && r.registrationId === person.id);
 
+  // ผู้ลงทะเบียนคนนี้เคยตอบแล้วหรือยัง
+  let answered = false;
+  if (person) {
+    for (const r of responses) {
+      if (r.eventId === event.id && r.registrationId === person.id) answered = true;
+    }
+  }
+
+  // เลือกว่าจะแสดงหน้าไหน: ส่งแล้ว / ยืนยันตัวตน / ตอบแล้ว / ยังไม่มีคำถาม / ฟอร์มตอบ
+  let view = 'form';
+  if (sent) {
+    view = 'sent';
+  } else if (closed && !person) {
+    view = 'verify';
+  } else if (answered) {
+    view = 'answered';
+  } else if (event.questions.length === 0) {
+    view = 'empty';
+  }
+
+  // งานปิด: ตรวจว่าที่กรอกมาตรงกับผู้ลงทะเบียนคนไหน
   function verify(e: FormEvent) {
     e.preventDefault();
-    const hit = findRegistration(event!.id, code);
-    if (!hit) return setError(t('ไม่พบข้อมูลการลงทะเบียน งานนี้ต้องลงทะเบียนก่อนจึงจะตอบแบบสอบถามได้', 'No registration found. This event requires registration before answering the survey.'));
+    const hit = findRegistration(event.id, code);
+    if (!hit) {
+      setError(t('ไม่พบข้อมูลการลงทะเบียน งานนี้ต้องลงทะเบียนก่อนจึงจะตอบแบบสอบถามได้', 'No registration found. This event requires registration before answering the survey.'));
+      return;
+    }
     setError('');
     setPerson(hit);
   }
@@ -59,13 +94,30 @@ export default function SurveyPage() {
 
   function handleSubmit(e: FormEvent) {
     e.preventDefault();
+
     // คำถามให้คะแนนและเลือกตอบ ต้องตอบ / พิมพ์ตอบเว้นว่างได้
-    for (const q of event!.questions) {
-      if (q.type !== 'text' && !answers[q.id]) return setError(t('กรุณาตอบ: ', 'Please answer: ') + q.text);
+    for (const q of event.questions) {
+      if (q.type !== 'text' && !answers[q.id]) {
+        setError(t('กรุณาตอบ: ', 'Please answer: ') + q.text);
+        return;
+      }
     }
     if (closed && !person) return;
-    setResponses([...responses, { id: newId(), eventId: event!.id, registrationId: person ? person.id : undefined, answers, createdAt: new Date().toISOString() }]);
+
+    let registrationId: string | undefined = undefined;
+    if (person) registrationId = person.id;
+
+    setResponses([...responses, { id: newId(), eventId: event.id, registrationId: registrationId, answers: answers, createdAt: new Date().toISOString() }]);
     setSent(true);
+  }
+
+  // ตัวเลือกที่ไม่ว่างของคำถามแบบเลือกตอบ
+  function nonEmpty(options: string[]): string[] {
+    const result: string[] = [];
+    for (const o of options) {
+      if (o) result.push(o);
+    }
+    return result;
   }
 
   return (
@@ -73,14 +125,18 @@ export default function SurveyPage() {
       <div className="public-top"><PrefsBar /></div>
       <EventHero event={event} subtitle={t('แบบสอบถามหลังกิจกรรม', 'Post-event survey')} />
 
-      {sent ? (
+      {/* ---------- ส่งคำตอบแล้ว ---------- */}
+      {view === 'sent' && (
         <div className="card stack-sm center-text">
           <div className="empty-icon" style={{ margin: '0 auto' }}><Icon name="check" size={28} /></div>
           <h2>{t('ขอบคุณสำหรับความคิดเห็น', 'Thank you for your feedback')}</h2>
           <p className="muted">{t('บันทึกคำตอบของคุณเรียบร้อยแล้ว', 'Your answers have been recorded.')}</p>
           {fromKiosk && <a className="btn primary big" href={'/k/' + event.id}>{t('กลับหน้า Kiosk', 'Back to kiosk')}</a>}
         </div>
-      ) : closed && !person ? (
+      )}
+
+      {/* ---------- งานปิด: ยืนยันการลงทะเบียนก่อน ---------- */}
+      {view === 'verify' && (
         <form className="card stack-sm" onSubmit={verify}>
           <div className="status-card info" style={{ padding: 0 }}>
             <span className="status-icon"><Icon name="lock" size={24} /></span>
@@ -94,16 +150,23 @@ export default function SurveyPage() {
           <button className="btn primary big">{t('ยืนยันการลงทะเบียน', 'Verify registration')}</button>
           <a className="link-btn small" href={'/register/' + event.id} style={{ justifySelf: 'center' }}>{t('ยังไม่ได้ลงทะเบียน? ไปหน้าลงทะเบียน', 'Not registered? Go to registration')}</a>
         </form>
-      ) : answered ? (
+      )}
+
+      {/* ---------- ตอบไปแล้ว ---------- */}
+      {view === 'answered' && (
         <div className="card stack-sm center-text">
           <div className="empty-icon" style={{ margin: '0 auto' }}><Icon name="check" size={28} /></div>
           <h2>{t('คุณตอบแบบสอบถามนี้แล้ว', 'You have already answered this survey')}</h2>
-          <p className="muted">{person!.name} · {person!.ticket}</p>
+          {person && <p className="muted">{person.name} · {person.ticket}</p>}
           {fromKiosk && <a className="btn primary big" href={'/k/' + event.id}>{t('กลับหน้า Kiosk', 'Back to kiosk')}</a>}
         </div>
-      ) : event.questions.length === 0 ? (
-        <div className="card muted">{t('กิจกรรมนี้ยังไม่มีแบบสอบถาม', 'This event has no survey yet.')}</div>
-      ) : (
+      )}
+
+      {/* ---------- ยังไม่มีคำถาม ---------- */}
+      {view === 'empty' && <div className="card muted">{t('กิจกรรมนี้ยังไม่มีแบบสอบถาม', 'This event has no survey yet.')}</div>}
+
+      {/* ---------- ฟอร์มตอบแบบสอบถาม ---------- */}
+      {view === 'form' && (
         <form className="stack" onSubmit={handleSubmit}>
           {person && <div className="alert info"><Icon name="user" size={16} /><span>{t('ตอบในนามของ ', 'Answering as ')}<b>{person.name}</b> · {person.ticket}</span></div>}
           {event.questions.map((q) => (
@@ -120,7 +183,7 @@ export default function SurveyPage() {
                 </div>
               )}
 
-              {q.type === 'choice' && q.options.filter((o) => o).map((o) => (
+              {q.type === 'choice' && nonEmpty(q.options).map((o) => (
                 <label key={o} className="check-row opt-pick">
                   <input type="radio" name={q.id} checked={answers[q.id] === o} onChange={() => setAnswer(q.id, o)} /> {o}
                 </label>
