@@ -28,14 +28,28 @@ export default function DashboardPage() {
   const [tab, setTab] = useState<Tab>('overview');
 
   // เปิดจากลิงก์ /dashboard#report -> เข้าแท็บรายงานเลย
-  useEffect(() => { if (window.location.hash === '#report') setTab('report'); }, []);
-  useEffect(() => { if (current) loadFont(current.theme.font); }, [current]);
+  useEffect(() => {
+    if (window.location.hash === '#report') setTab('report');
+  }, []);
+
+  // โหลดฟอนต์ของงาน
+  useEffect(() => {
+    if (current) loadFont(current.theme.font);
+  }, [current]);
 
   if (!current) return <NoEvent />;
   const event = current;
 
-  const regs = allRegs.filter((r) => r.eventId === event.id);
-  const responses = allResponses.filter((r) => r.eventId === event.id);
+  // เอาเฉพาะข้อมูลของกิจกรรมนี้
+  const regs: Registration[] = [];
+  for (const r of allRegs) {
+    if (r.eventId === event.id) regs.push(r);
+  }
+  const responses: Response[] = [];
+  for (const r of allResponses) {
+    if (r.eventId === event.id) responses.push(r);
+  }
+
   const s = summarize(event, regs, responses);
   const file = safeName(event.title);
 
@@ -47,14 +61,25 @@ export default function DashboardPage() {
     ]);
   }
 
+  // สลับแท็บ และเปลี่ยนส่วน # ในลิงก์ตาม
   function changeTab(next: Tab) {
     setTab(next);
-    history.replaceState(null, '', next === 'report' ? '#report' : window.location.pathname);
+    if (next === 'report') {
+      history.replaceState(null, '', '#report');
+    } else {
+      history.replaceState(null, '', window.location.pathname);
+    }
   }
 
-  const countdown = s.daysLeft > 0 ? { n: s.daysLeft, l: t('วันก่อนเริ่มงาน', 'days to go') }
-    : Date.now() <= Date.parse(event.endAt) ? { n: t('วันนี้', 'Live'), l: t('งานกำลังดำเนินอยู่', 'happening now') }
-    : { n: Math.abs(s.daysLeft), l: t('วันที่แล้ว (จบงาน)', 'days ago (ended)') };
+  // ตัวนับถอยหลัง: ก่อนงานเริ่ม / งานกำลังดำเนินอยู่ / งานจบแล้ว
+  let countdown: { n: string | number; l: string };
+  if (s.daysLeft > 0) {
+    countdown = { n: s.daysLeft, l: t('วันก่อนเริ่มงาน', 'days to go') };
+  } else if (Date.now() <= Date.parse(event.endAt)) {
+    countdown = { n: t('วันนี้', 'Live'), l: t('งานกำลังดำเนินอยู่', 'happening now') };
+  } else {
+    countdown = { n: Math.abs(s.daysLeft), l: t('วันที่แล้ว (จบงาน)', 'days ago (ended)') };
+  }
 
   return (
     <div className="stack">
@@ -102,11 +127,8 @@ export default function DashboardPage() {
         )}
       </div>
 
-      {tab === 'overview' ? (
-        <EventAnalytics event={event} regs={regs} responses={responses} days={days} />
-      ) : (
-        <EventReport event={event} regs={regs} responses={responses} />
-      )}
+      {tab === 'overview' && <EventAnalytics event={event} regs={regs} responses={responses} days={days} />}
+      {tab === 'report' && <EventReport event={event} regs={regs} responses={responses} />}
     </div>
   );
 }
